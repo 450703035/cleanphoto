@@ -44,6 +44,7 @@ final class PhotoStore: ObservableObject {
         allAssets.removeAll { ids.contains($0.id) }
         await DatabaseService.shared.removeScores(for: Array(ids))
         await DatabaseService.shared.saveDeleteRecords(assets)
+        await DatabaseService.shared.markAssetsDeleted(Array(ids))
         lastDeletedIds = ids        // triggers all subscriptions
     }
 }

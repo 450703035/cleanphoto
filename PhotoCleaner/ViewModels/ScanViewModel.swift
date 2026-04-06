@@ -200,6 +200,14 @@ class ScanViewModel: ObservableObject {
 
         let ids = raw.map { $0.id }
         let cached = await DatabaseService.shared.loadScores(for: ids)
+        let activeScannedIds = await DatabaseService.shared.loadActiveScannedIds(for: ids)
+        let cachedScannedIds = Set(cached.keys)
+        if !cachedScannedIds.isEmpty {
+            // Backfill scan-state table for users upgrading from older schema.
+            await DatabaseService.shared.markAssetsScanned(Array(cachedScannedIds))
+        }
+        let alreadyScannedIds = activeScannedIds.union(cachedScannedIds)
+        let newAssetIDs = Set(ids).subtracting(alreadyScannedIds)
 
         // Apply cached scores immediately; uncached assets keep neutral score for quick display.
         var scored = raw.map { a -> PhotoAsset in
@@ -215,6 +223,12 @@ class ScanViewModel: ObservableObject {
         store.setAssets(scored)
         allAssets = scored
         let nonFavorite = scored.filter { !$0.asset.isFavorite }
+        let assetMap = Dictionary(uniqueKeysWithValues: scored.map { ($0.id, $0) })
+        let rows = await DatabaseService.shared.loadGroupRows()
+        let (cachedDup, cachedSim) = rebuildGroups(from: rows, assetMap: assetMap)
+        duplicateGroups = cachedDup.map { filteredGroupExcludingFavorites($0) }.filter { $0.assets.count >= 2 }
+        similarGroups = cachedSim.map { filteredGroupExcludingFavorites($0) }.filter { $0.assets.count >= 2 }
+
         screenshots = nonFavorite.filter { $0.asset.mediaSubtypes.contains(.photoScreenshot) }
             .map { var a = $0; a.isSelected = a.score < 45; return a }
         videos = nonFavorite.filter { $0.asset.mediaType == .video }
@@ -222,17 +236,24 @@ class ScanViewModel: ObservableObject {
             .map { var a = $0; a.isSelected = false; return a }
         favorites = scored.filter { $0.asset.isFavorite }
             .map { var a = $0; a.isSelected = false; return a }
-        duplicateGroups = []
-        similarGroups = []
-        lowQuality = []
+        let cachedQualityMap: [String: PhotoLibraryService.QualitySignals] = cached.mapValues {
+            PhotoLibraryService.QualitySignals(
+                isBlurry: $0.isBlurry,
+                isShaky: $0.isBlurry && !$0.isOverExposed && !$0.isUnderExposed,
+                isFocusFailed: $0.isBlurry,
+                isOverExposed: $0.isOverExposed,
+                isUnderExposed: $0.isUnderExposed
+            )
+        }
+        lowQuality = service.findLowQuality(assets: nonFavorite, qualityMap: cachedQualityMap)
         behaviorAssets = buildBehaviorAssets(
             from: nonFavorite,
             excludingIDs: occupiedAssetIDsForOtherCategories(
-                duplicateGroups: [],
-                similarGroups: [],
+                duplicateGroups: duplicateGroups,
+                similarGroups: similarGroups,
                 screenshots: screenshots,
                 videos: videos,
-                lowQuality: []
+                lowQuality: lowQuality
             )
         )
         // Make behavior size trustworthy in first-pass result.
@@ -259,19 +280,24 @@ class ScanViewModel: ObservableObject {
                 initialScored: scored,
                 cached: cached,
                 ids: ids,
+                newAssetIDs: newAssetIDs,
                 scanStart: scanStart
             )
         }
 
-        // Keep scanning UI for at least 60s so first result is more stable.
-        let minimumFirstPassSeconds = 60
-        while !Task.isCancelled {
-            let elapsed = Int(Date().timeIntervalSince(scanStart))
-            if elapsed >= minimumFirstPassSeconds { break }
-            let t = Double(elapsed) / Double(max(1, minimumFirstPassSeconds))
-            progress = min(0.98, 0.55 + t * 0.43)
-            phaseLabel = "第一阶段：统计空间与类型 \(minimumFirstPassSeconds - elapsed)s"
-            try? await Task.sleep(nanoseconds: 1_000_000_000)
+        // For repeat scans (no new assets), don't keep users on a forced waiting screen.
+        // Only keep a short settling window when we truly have new/uncached work.
+        let hasPendingDeepWork = !newAssetIDs.isEmpty || cached.count < ids.count
+        let minimumFirstPassSeconds = hasPendingDeepWork ? 15 : 0
+        if minimumFirstPassSeconds > 0 {
+            while !Task.isCancelled {
+                let elapsed = Int(Date().timeIntervalSince(scanStart))
+                if elapsed >= minimumFirstPassSeconds { break }
+                let t = Double(elapsed) / Double(max(1, minimumFirstPassSeconds))
+                progress = min(0.98, 0.55 + t * 0.43)
+                phaseLabel = "第一阶段：统计空间与类型 \(minimumFirstPassSeconds - elapsed)s"
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+            }
         }
         guard !Task.isCancelled else {
             scanClockTask?.cancel()
@@ -279,6 +305,9 @@ class ScanViewModel: ObservableObject {
         }
         progress = 1.0
         phase = .done
+        if !isBackgroundAnalyzing {
+            finalizeScanDuration(scanStart: scanStart)
+        }
     }
 
     private func performBackgroundDeepScan(
@@ -286,6 +315,7 @@ class ScanViewModel: ObservableObject {
         initialScored: [PhotoAsset],
         cached: [String: DatabaseService.CachedScore],
         ids: [String],
+        newAssetIDs: Set<String>,
         scanStart: Date
     ) async {
         var scored = initialScored
@@ -371,16 +401,25 @@ class ScanViewModel: ObservableObject {
         allAssets = scored
         store.setAssets(scored)
         await DatabaseService.shared.saveScores(newEntries)
+        if !newAssetIDs.isEmpty {
+            await DatabaseService.shared.markAssetsScanned(Array(newAssetIDs))
+        }
 
         let nonFavorite = scored.filter { !$0.asset.isFavorite }
+        let newNonFavorite = nonFavorite.filter { newAssetIDs.contains($0.id) }
 
         backgroundLabel = "后台分析：重复照片"
         backgroundProgress = 0.62
-        duplicateGroups = await service.findDuplicates(assets: nonFavorite)
+        let newDuplicateGroups = await service.findDuplicates(assets: newNonFavorite)
 
         backgroundLabel = "后台分析：相似照片"
         backgroundProgress = 0.74
-        similarGroups = await service.findSimilar(assets: nonFavorite)
+        let newSimilarGroups = await service.findSimilar(assets: newNonFavorite)
+
+        let mergedDuplicateGroups = mergeGroups(duplicateGroups + newDuplicateGroups)
+        let mergedSimilarGroups = mergeGroups(similarGroups + newSimilarGroups)
+        duplicateGroups = mergedDuplicateGroups
+        similarGroups = mergedSimilarGroups
 
         backgroundLabel = "后台分析：低质量照片"
         backgroundProgress = 0.84
@@ -428,9 +467,9 @@ class ScanViewModel: ObservableObject {
 
         backgroundProgress = 1.0
         backgroundLabel = "后台分析完成"
-        scanClockTask?.cancel()
-        scanElapsedSeconds = Int(Date().timeIntervalSince(scanStart))
-        lastScanDurationSeconds = scanElapsedSeconds
+        if phase == .done {
+            finalizeScanDuration(scanStart: scanStart)
+        }
         isBackgroundAnalyzing = false
         phaseLabel = "分析完成"
         progress = 1.0
@@ -474,6 +513,21 @@ class ScanViewModel: ObservableObject {
         let bad = assets.filter { $0.score < 40 }.count
         s.healthScore = max(0, 100 - Int(Double(bad) / Double(max(assets.count, 1)) * 100))
         summary = s
+    }
+
+    private func mergeGroups(_ groups: [PhotoGroup]) -> [PhotoGroup] {
+        var seen = Set<String>()
+        var merged: [PhotoGroup] = []
+        for group in groups {
+            let ids = group.assets.map(\.id).sorted()
+            guard ids.count >= 2 else { continue }
+            let typeKey = group.groupType == .duplicate ? "duplicate" : "similar"
+            let key = "\(typeKey):\(ids.joined(separator: "|"))"
+            guard !seen.contains(key) else { continue }
+            seen.insert(key)
+            merged.append(group)
+        }
+        return merged
     }
 
     func deleteSelected(from assets: [PhotoAsset]) async throws {
@@ -569,10 +623,8 @@ class ScanViewModel: ObservableObject {
             .filter { !excludingIDs.contains($0.id) }
             .map { asset in
                 var a = asset
-                let years = Calendar.current.dateComponents([.year], from: a.creationDate, to: Date()).year ?? 0
-                // Behavior-based recommendation:
-                // >= 3 years old is pre-selected as "long time not viewed" proxy.
-                a.isSelected = years >= 3
+                // "其他使用行为" 默认不自动勾选，避免误删。
+                a.isSelected = false
                 return a
             }
             .sorted { $0.creationDate < $1.creationDate }
@@ -603,5 +655,11 @@ class ScanViewModel: ObservableObject {
             return String(format: "%d:%02d:%02d", h, m, sec)
         }
         return String(format: "%02d:%02d", m, sec)
+    }
+
+    private func finalizeScanDuration(scanStart: Date) {
+        scanClockTask?.cancel()
+        scanElapsedSeconds = Int(Date().timeIntervalSince(scanStart))
+        lastScanDurationSeconds = scanElapsedSeconds
     }
 }

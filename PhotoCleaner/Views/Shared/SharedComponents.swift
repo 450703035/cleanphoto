@@ -13,7 +13,7 @@ struct ScoreBadge: View {
             .padding(.horizontal, 5)
             .padding(.vertical, 2)
             .background(score.scoreColor)
-            .cornerRadius(4)
+            .cornerRadius(3)
     }
 }
 
@@ -80,7 +80,7 @@ struct LargePhotoCard: View {
                 .frame(maxWidth: .infinity)
                 .frame(height: 200)
                 .clipped()
-                .cornerRadius(14)
+                .cornerRadius(8)
 
             VStack {
                 HStack {
@@ -109,7 +109,7 @@ struct LargePhotoCard: View {
             .padding(10)
 
             if isSelected {
-                RoundedRectangle(cornerRadius: 14)
+                RoundedRectangle(cornerRadius: 8)
                     .fill(Color.black.opacity(0.25))
             }
         }
@@ -133,7 +133,7 @@ struct SmallPhotoCell: View {
                 .frame(maxWidth: .infinity)
                 .aspectRatio(1, contentMode: .fill)
                 .clipped()
-                .cornerRadius(10)
+                .cornerRadius(8)
                 .opacity(isSelected ? 0.82 : 1.0)
 
             VStack {
@@ -154,7 +154,7 @@ struct SmallPhotoCell: View {
             .padding(4)
 
             if isSelected {
-                RoundedRectangle(cornerRadius: 10)
+                RoundedRectangle(cornerRadius: 8)
                     .fill(Color.black.opacity(0.22))
             }
         }
@@ -183,10 +183,13 @@ struct BottomDeleteBar: View {
                         .fontWeight(.bold)
                 }
                 .frame(maxWidth: .infinity)
-                .padding()
-                .background(color)
                 .foregroundColor(.white)
-                .cornerRadius(14)
+                .padding(.horizontal, 18)
+                .padding(.vertical, 10)
+                .background(
+                    RoundedRectangle(cornerRadius: 980)
+                        .fill(color)
+                )
                 .padding(.horizontal)
                 .padding(.vertical, 10)
             }
@@ -210,7 +213,7 @@ struct SubScreenHeader: View {
                         Image(systemName: "chevron.left")
                         Text("返回")
                     }
-                    .foregroundColor(AppColors.purple)
+                    .foregroundColor(AppColors.lightPurple)
                 }
                 Spacer()
                 trailing
@@ -221,11 +224,11 @@ struct SubScreenHeader: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
-                    .font(.headline)
-                    .foregroundColor(.white)
+                    .font(AppTypography.body.weight(.semibold))
+                    .foregroundColor(AppColors.textPrimary)
                 if !subtitle.isEmpty {
                     Text(subtitle)
-                        .font(.caption)
+                        .font(AppTypography.caption)
                         .foregroundColor(AppColors.textSecondary)
                 }
             }
@@ -248,7 +251,7 @@ struct DoneView: View {
     var body: some View {
         VStack(spacing: 16) {
             Text("🎉").font(.system(size: 64))
-            Text("清理完成！").font(.title2).bold().foregroundColor(.white)
+            Text("清理完成！").font(.title2).bold().foregroundColor(AppColors.textPrimary)
             Text("\(count) \(label)")
                 .font(.largeTitle).bold()
                 .foregroundColor(AppColors.lightPurple)
@@ -257,7 +260,7 @@ struct DoneView: View {
                 .foregroundColor(AppColors.textSecondary)
                 .font(.subheadline)
             Button("返回", action: onBack)
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(ApplePrimaryButtonStyle())
                 .tint(AppColors.purple)
                 .padding(.top, 8)
         }
@@ -282,9 +285,9 @@ struct SettingsToggleRow: View {
                 .frame(width: 30, height: 30)
                 .background(iconBg)
                 .foregroundColor(.white)
-                .cornerRadius(8)
+                .cornerRadius(AppShape.iconRadius)
             VStack(alignment: .leading, spacing: 1) {
-                Text(title).foregroundColor(.white).font(.subheadline)
+                Text(title).foregroundColor(AppColors.textPrimary).font(AppTypography.body)
                 Text(subtitle).foregroundColor(AppColors.textTertiary).font(.caption)
             }
             Spacer()
@@ -317,7 +320,11 @@ struct AlbumFolderCell: View {
                     }
                 }
             }
-            .cornerRadius(10)
+        .cornerRadius(10)
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(AppColors.subtleBorder, lineWidth: 0.5)
+        )
 
             // Overlay info
             VStack(alignment: .leading, spacing: 1) {

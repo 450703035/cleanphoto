@@ -26,12 +26,12 @@ struct BlurDetectToolView: View {
     var body: some View {
         ZStack(alignment: .bottom) {
             AppColors.darkBG.ignoresSafeArea()
-            if done { DoneView(count: selected.count, label: "张模糊照片", onBack: onDismiss) }
+            if done { DoneView(count: selected.count, label: L10n.blurDone(selected.count), onBack: onDismiss) }
             else {
                 VStack(spacing: 0) {
                     SubScreenHeader(
-                        title: "模糊检测",
-                        subtitle: isScanning ? "检测中… \(blurScores.count)/\(allPhAssets.count)" : "发现 \(blurryAssets.count) 张模糊照片",
+                        title: L10n.blurDetect,
+                        subtitle: isScanning ? L10n.blurScanning(blurScores.count, allPhAssets.count) : L10n.blurFound(blurryAssets.count),
                         onBack: onDismiss
                     )
 
@@ -39,14 +39,14 @@ struct BlurDetectToolView: View {
                         VStack(spacing: 12) {
                             Spacer()
                             ProgressView(value: scanProgress).tint(AppColors.green).padding(.horizontal, 40)
-                            Text("正在分析照片清晰度…").font(.caption).foregroundColor(AppColors.textSecondary)
+                            Text(L10n.analyzingClarity).font(AppTypography.caption).foregroundColor(AppColors.textSecondary)
                             if !blurryAssets.isEmpty {
-                                Text("已发现 \(blurryAssets.count) 张模糊照片").font(.caption).foregroundColor(AppColors.green)
+                                Text(L10n.foundBlurry(blurryAssets.count)).font(AppTypography.caption).foregroundColor(AppColors.green)
                             }
                             Spacer()
                         }
                     } else if blurryAssets.isEmpty {
-                        ToolEmptyView(icon: "checkmark.circle", message: "未发现模糊照片\n你的照片都很清晰！")
+                        ToolEmptyView(icon: "checkmark.circle", message: L10n.noBlurry)
                     } else {
                         ScrollView {
                             LazyVGrid(columns: cols, spacing: 3) {
@@ -166,21 +166,21 @@ struct BlurPhotoCell: View {
     let onTap: () -> Void
 
     private var blurLabel: String {
-        if score < 10 { return "严重模糊" }
-        if score < 25 { return "模糊" }
-        return "轻微模糊"
+        if score < 10 { return L10n.severeBlur }
+        if score < 25 { return L10n.blurry }
+        return L10n.slightBlur
     }
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
             PhotoThumbnail(asset: asset, size: 110)
                 .frame(maxWidth: .infinity).aspectRatio(1, contentMode: .fill)
-                .clipped().cornerRadius(10)
+                .clipped().cornerRadius(AppShape.mediaRadius)
             ScoreBadge(score: score).padding(3)
             Text(blurLabel).font(.system(size: 8, weight: .bold)).foregroundColor(AppColors.red)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom).padding(.bottom, 4)
             if isSelected {
-                RoundedRectangle(cornerRadius: 10).stroke(AppColors.selectionBlue, lineWidth: 2)
+                RoundedRectangle(cornerRadius: AppShape.mediaRadius).stroke(AppColors.selectionBlue, lineWidth: 2)
                 Image(systemName: "checkmark").font(.system(size: 8)).foregroundColor(.white)
                     .frame(width: 16, height: 16).background(AppColors.selectionBlue).clipShape(Circle())
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading).padding(4)

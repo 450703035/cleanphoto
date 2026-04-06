@@ -21,33 +21,33 @@ struct VideoCompressToolView: View {
     var body: some View {
         ZStack(alignment: .bottom) {
             AppColors.darkBG.ignoresSafeArea()
-            if done { DoneView(count: selected.count, label: "个视频已压缩", onBack: onDismiss) }
+            if done { DoneView(count: selected.count, label: L10n.videosCompressed(selected.count), onBack: onDismiss) }
             else {
                 VStack(spacing: 0) {
-                    SubScreenHeader(title: "视频压缩", subtitle: "智能压缩，画质损失最小", onBack: onDismiss)
+                    SubScreenHeader(title: L10n.videoCompress, subtitle: L10n.videoCompressDesc, onBack: onDismiss)
 
                     VStack(spacing: 8) {
-                        Text("压缩质量").font(.caption).foregroundColor(AppColors.textSecondary)
+                        Text(L10n.compressQuality).font(AppTypography.caption).foregroundColor(AppColors.textSecondary)
                             .frame(maxWidth: .infinity, alignment: .leading)
                         Slider(value: $quality, in: 0.3...0.95).tint(AppColors.purple)
                         HStack {
-                            Text("高压缩率").font(.caption).foregroundColor(AppColors.textSecondary)
+                            Text(L10n.highCompression).font(AppTypography.caption).foregroundColor(AppColors.textSecondary)
                             Spacer()
-                            Text("\(Int(quality * 100))% 质量").font(.subheadline).fontWeight(.bold).foregroundColor(AppColors.lightPurple)
+                            Text(L10n.qualityPercent(Int(quality * 100))).font(AppTypography.body.weight(.semibold)).foregroundColor(AppColors.lightPurple)
                             Spacer()
-                            Text("高画质").font(.caption).foregroundColor(AppColors.textSecondary)
+                            Text(L10n.highQuality).font(AppTypography.caption).foregroundColor(AppColors.textSecondary)
                         }
                         if savedBytes > 0 {
-                            Text("预计节省 \(ByteCountFormatter.string(fromByteCount: savedBytes, countStyle: .file))")
-                                .font(.subheadline).foregroundColor(AppColors.green)
+                            Text(L10n.estimatedSave(ByteCountFormatter.string(fromByteCount: savedBytes, countStyle: .file)))
+                                .font(AppTypography.body).foregroundColor(AppColors.green)
                         }
                     }
-                    .padding().background(AppColors.cardBG).cornerRadius(14).padding()
+                    .padding().appleCardStyle().padding()
 
                     if isLoading {
-                        ToolLoadingView(message: "正在加载视频…")
+                        ToolLoadingView(message: L10n.loadingVideos)
                     } else if phAssets.isEmpty {
-                        ToolEmptyView(icon: "video.slash", message: "相册中没有视频文件")
+                        ToolEmptyView(icon: "video.slash", message: L10n.noVideos)
                     } else {
                         List {
                             ForEach(phAssets, id: \.localIdentifier) { asset in
@@ -65,7 +65,7 @@ struct VideoCompressToolView: View {
                     BottomDeleteBar(
                         count: selected.count,
                         sizeLabel: ByteCountFormatter.string(fromByteCount: savedBytes, countStyle: .file),
-                        actionLabel: "压缩所选",
+                        actionLabel: L10n.compressSelected,
                         color: AppColors.amber
                     ) {
                         Task {
@@ -109,15 +109,15 @@ struct VideoCompressRow: View {
     var body: some View {
         HStack(spacing: 12) {
             ZStack(alignment: .bottomTrailing) {
-                PhotoThumbnail(asset: asset, size: 52).cornerRadius(10)
+                PhotoThumbnail(asset: asset, size: 52).cornerRadius(AppShape.mediaRadius)
                 Text(durationStr).font(.system(size: 8, weight: .bold)).foregroundColor(.white)
                     .padding(.horizontal, 3).padding(.vertical, 1)
-                    .background(Color.black.opacity(0.7)).cornerRadius(3).padding(3)
+                    .background(Color.black.opacity(0.7)).cornerRadius(AppShape.iconRadius).padding(3)
             }
             VStack(alignment: .leading, spacing: 2) {
-                Text(assetFilename(asset)).foregroundColor(.white).font(.subheadline).fontWeight(.semibold).lineLimit(1)
+                Text(assetFilename(asset)).foregroundColor(AppColors.textPrimary).font(AppTypography.body.weight(.semibold)).lineLimit(1)
                 Text("\(ByteCountFormatter.string(fromByteCount: sizeBytes, countStyle: .file)) → \(ByteCountFormatter.string(fromByteCount: Int64(Double(sizeBytes) * quality * 0.8), countStyle: .file))")
-                    .font(.caption).foregroundColor(AppColors.textSecondary)
+                    .font(AppTypography.caption).foregroundColor(AppColors.textSecondary)
             }
             Spacer()
             rowCheck(isSelected)

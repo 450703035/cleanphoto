@@ -10,18 +10,18 @@ private struct LocationLabel: View {
     @State private var text: String = ""
 
     var body: some View {
-        Text(text.isEmpty ? "定位中…" : text)
+        Text(text.isEmpty ? L10n.locating : text)
             .task(id: asset.localIdentifier) { await geocode() }
     }
 
     private func geocode() async {
-        guard let loc = asset.location else { text = "无位置信息"; return }
+        guard let loc = asset.location else { text = L10n.noLocation; return }
         let geocoder = CLGeocoder()
         if let marks = try? await geocoder.reverseGeocodeLocation(loc), let p = marks.first {
             let parts = [p.locality ?? p.administrativeArea, p.country].compactMap { $0 }
-            text = parts.isEmpty ? "位置未知" : parts.joined(separator: ", ")
+            text = parts.isEmpty ? L10n.unknownLocation : parts.joined(separator: ", ")
         } else {
-            text = "位置未知"
+            text = L10n.unknownLocation
         }
     }
 }
@@ -49,7 +49,6 @@ struct SwipeDeleteToolView: View {
 
     @Environment(\.dismiss) private var envDismiss
 
-    private let service = PhotoLibraryService.shared
     let THRESHOLD: CGFloat = 90
     var current: PhotoAsset? { queue.first }
     var nextCard: PhotoAsset? { queue.count > 1 ? queue[1] : nil }
@@ -67,15 +66,15 @@ struct SwipeDeleteToolView: View {
                     } label: {
                         HStack(spacing: 4) {
                             Image(systemName: "chevron.left")
-                            Text("返回")
+                            Text(L10n.back)
                         }
-                        .foregroundColor(AppColors.purple)
+                        .foregroundColor(AppColors.lightPurple)
                     }
                     .buttonStyle(.plain)
                     Spacer()
                     if !queue.isEmpty {
                         Text("\(currentIndex) / \(total)")
-                            .font(.title3).bold().foregroundColor(.white)
+                            .font(.title3).bold().foregroundColor(AppColors.textPrimary)
                     }
                     Spacer()
                     ZStack(alignment: .topTrailing) {
@@ -100,11 +99,11 @@ struct SwipeDeleteToolView: View {
 
                 if isLoading {
                     Spacer()
-                    ToolLoadingView(message: "加载照片…")
+                    ToolLoadingView(message: L10n.loadingPhotos)
                     Spacer()
                 } else if queue.isEmpty && total == 0 {
                     Spacer()
-                    ToolEmptyView(icon: "photo", message: "相册中没有照片")
+                    ToolEmptyView(icon: "photo", message: L10n.noPhotosInAlbum)
                     Spacer()
                 } else if queue.isEmpty {
                     allDoneView
@@ -139,17 +138,17 @@ struct SwipeDeleteToolView: View {
         .sheet(item: $infoSheetPhoto) { photo in
             PhotoInfoSheet(photo: photo)
         }
-        .alert("允许删除照片", isPresented: $showDeleteAlert, presenting: pendingDeletePhoto) { photo in
-            Button("允许删除", role: .destructive) {
+        .alert(L10n.allowDeleteTitle, isPresented: $showDeleteAlert, presenting: pendingDeletePhoto) { photo in
+            Button(L10n.allowDelete, role: .destructive) {
                 hasPromptedForDelete = true
                 commitDelete(photo)
             }
-            Button("取消", role: .cancel) {
+            Button(L10n.cancel, role: .cancel) {
                 pendingDeletePhoto = nil
                 withAnimation(.spring()) { drag = .zero }
             }
         } message: { _ in
-            Text("相册管家将把选中的照片移入废纸篓，您随时可以在「最近删除」相册中恢复。")
+            Text(L10n.deleteAlertMessage)
         }
     }
 
@@ -157,19 +156,19 @@ struct SwipeDeleteToolView: View {
         VStack(spacing: 16) {
             Spacer()
             Text("✅").font(.system(size: 64))
-            Text("全部完成！").font(.title2).bold().foregroundColor(.white)
+            Text(L10n.allDone).font(.title2).bold().foregroundColor(AppColors.textPrimary)
             HStack(spacing: 32) {
                 VStack(spacing: 4) {
                     Text("\(deletedCount)").font(.largeTitle).bold().foregroundColor(AppColors.red)
-                    Text("已删除").font(.caption).foregroundColor(AppColors.textSecondary)
+                    Text(L10n.deleted).font(.caption).foregroundColor(AppColors.textSecondary)
                 }
                 VStack(spacing: 4) {
                     Text("\(keptCount)").font(.largeTitle).bold().foregroundColor(AppColors.green)
-                    Text("已保留").font(.caption).foregroundColor(AppColors.textSecondary)
+                    Text(L10n.kept).font(.caption).foregroundColor(AppColors.textSecondary)
                 }
             }
-            Button("返回", action: onDismiss)
-                .buttonStyle(.borderedProminent).tint(AppColors.purple).padding(.top, 8)
+            Button(L10n.back, action: onDismiss)
+                .buttonStyle(ApplePrimaryButtonStyle()).padding(.top, 8)
             Spacer()
         }
     }
@@ -206,9 +205,9 @@ struct SwipeDeleteToolView: View {
                 circleBtn(icon: "xmark", size: 64, color: AppColors.red) { doAction(.delete) }
                 Button(action: undoLast) {
                     Image(systemName: "arrow.uturn.backward").font(.system(size: 18))
-                        .foregroundColor(history.isEmpty ? AppColors.textTertiary : .white.opacity(0.7))
+                        .foregroundColor(history.isEmpty ? AppColors.textTertiary : AppColors.textPrimary.opacity(0.7))
                         .frame(width: 44, height: 44)
-                        .background(Color.white.opacity(history.isEmpty ? 0.03 : 0.08))
+                        .background(AppColors.chipBG.opacity(history.isEmpty ? 0.5 : 1.0))
                         .clipShape(Circle())
                 }
                 .disabled(history.isEmpty)
@@ -323,7 +322,7 @@ struct SwipeDeleteToolView: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text(formattedDate(photo.creationDate))
                     .font(.system(size: 15, weight: .semibold, design: .monospaced))
-                    .foregroundColor(.white)
+                    .foregroundColor(AppColors.textPrimary)
 
                 HStack(spacing: 5) {
                     Image(systemName: "mappin.and.ellipse")
@@ -372,8 +371,11 @@ struct SwipeDeleteToolView: View {
             .background(AppColors.cardBG)
         }
         .frame(width: photoW)
-        .clipShape(RoundedRectangle(cornerRadius: 22))
-        .overlay(RoundedRectangle(cornerRadius: 22).stroke(Color.white.opacity(0.08), lineWidth: 0.5))
+        .clipShape(RoundedRectangle(cornerRadius: AppShape.cardRadius))
+        .overlay(
+            RoundedRectangle(cornerRadius: AppShape.cardRadius)
+                .stroke(AppColors.subtleBorder, lineWidth: AppShape.borderWidth)
+        )
     }
 
     private func durationString(_ seconds: TimeInterval) -> String {
@@ -494,7 +496,7 @@ struct SwipeDeleteToolView: View {
             history.append((photo, .delete))
             queue.removeFirst()
             deletedCount += 1
-            Task { try? await service.deleteAssets([photo]) }
+            Task { try? await PhotoStore.shared.deleteAssets([photo]) }
             drag = .zero
             lastAction = .delete
         }
@@ -547,7 +549,7 @@ struct PhotoInfoSheet: View {
                         PhotoThumbnail(asset: asset, size: 200)
                             .frame(width: 200, height: 200)
                             .clipped()
-                            .cornerRadius(12)
+                            .cornerRadius(AppShape.mediaRadius)
                         Spacer()
                     }
                     .listRowBackground(Color.clear)

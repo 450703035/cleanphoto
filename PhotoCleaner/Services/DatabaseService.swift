@@ -67,6 +67,14 @@ final class DatabaseService: @unchecked Sendable {
                 size_bytes INTEGER NOT NULL
             );
             CREATE INDEX IF NOT EXISTS idx_delete_date ON delete_records(deleted_at);
+            CREATE TABLE IF NOT EXISTS asset_scan_state (
+                local_id         TEXT PRIMARY KEY,
+                first_scanned_at INTEGER NOT NULL,
+                last_scanned_at  INTEGER NOT NULL,
+                is_deleted       INTEGER NOT NULL DEFAULT 0,
+                deleted_at       INTEGER
+            );
+            CREATE INDEX IF NOT EXISTS idx_asset_scan_deleted ON asset_scan_state(is_deleted);
         """, nil, nil, nil)
     }
 
@@ -359,6 +367,100 @@ final class DatabaseService: @unchecked Sendable {
                 sqlite3_bind_text(stmt,  1, a.id,        -1, SQLITE_TRANSIENT)
                 sqlite3_bind_int64(stmt, 2, now)
                 sqlite3_bind_int64(stmt, 3, a.sizeBytes)
+                sqlite3_step(stmt)
+                sqlite3_reset(stmt)
+            }
+            sqlite3_finalize(stmt)
+        }
+        exec("COMMIT")
+    }
+
+    // MARK: - Asset Scan State
+
+    func loadActiveScannedIds(for ids: [String]) async -> Set<String> {
+        await run { self._loadActiveScannedIds(for: ids) }
+    }
+
+    private func _loadActiveScannedIds(for ids: [String]) -> Set<String> {
+        guard !ids.isEmpty else { return [] }
+        let chunkSize = 500
+        var offset = 0
+        var result = Set<String>()
+        while offset < ids.count {
+            let chunk = Array(ids[offset..<min(offset + chunkSize, ids.count)])
+            let placeholders = chunk.map { _ in "?" }.joined(separator: ",")
+            let sql = """
+                SELECT local_id
+                FROM asset_scan_state
+                WHERE is_deleted = 0 AND local_id IN (\(placeholders))
+            """
+            var stmt: OpaquePointer?
+            if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
+                for (i, id) in chunk.enumerated() {
+                    sqlite3_bind_text(stmt, Int32(i + 1), id, -1, SQLITE_TRANSIENT)
+                }
+                while sqlite3_step(stmt) == SQLITE_ROW {
+                    result.insert(String(cString: sqlite3_column_text(stmt, 0)))
+                }
+                sqlite3_finalize(stmt)
+            }
+            offset += chunkSize
+        }
+        return result
+    }
+
+    func markAssetsScanned(_ ids: [String]) async {
+        await run { self._markAssetsScanned(ids) }
+    }
+
+    private func _markAssetsScanned(_ ids: [String]) {
+        guard !ids.isEmpty else { return }
+        let sql = """
+            INSERT INTO asset_scan_state (local_id, first_scanned_at, last_scanned_at, is_deleted, deleted_at)
+            VALUES (?, ?, ?, 0, NULL)
+            ON CONFLICT(local_id) DO UPDATE SET
+                last_scanned_at = excluded.last_scanned_at,
+                is_deleted = 0,
+                deleted_at = NULL
+        """
+        exec("BEGIN")
+        var stmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
+            let now = Int64(Date().timeIntervalSince1970)
+            for id in ids {
+                sqlite3_bind_text(stmt, 1, id, -1, SQLITE_TRANSIENT)
+                sqlite3_bind_int64(stmt, 2, now)
+                sqlite3_bind_int64(stmt, 3, now)
+                sqlite3_step(stmt)
+                sqlite3_reset(stmt)
+            }
+            sqlite3_finalize(stmt)
+        }
+        exec("COMMIT")
+    }
+
+    func markAssetsDeleted(_ ids: [String]) async {
+        await run { self._markAssetsDeleted(ids) }
+    }
+
+    private func _markAssetsDeleted(_ ids: [String]) {
+        guard !ids.isEmpty else { return }
+        let sql = """
+            INSERT INTO asset_scan_state (local_id, first_scanned_at, last_scanned_at, is_deleted, deleted_at)
+            VALUES (?, ?, ?, 1, ?)
+            ON CONFLICT(local_id) DO UPDATE SET
+                is_deleted = 1,
+                deleted_at = excluded.deleted_at
+        """
+        exec("BEGIN")
+        var stmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
+            let now = Int64(Date().timeIntervalSince1970)
+            for id in ids {
+                sqlite3_bind_text(stmt, 1, id, -1, SQLITE_TRANSIENT)
+                sqlite3_bind_int64(stmt, 2, now)
+                sqlite3_bind_int64(stmt, 3, now)
+                sqlite3_bind_int64(stmt, 4, now)
                 sqlite3_step(stmt)
                 sqlite3_reset(stmt)
             }

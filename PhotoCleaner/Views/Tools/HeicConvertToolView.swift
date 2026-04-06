@@ -13,25 +13,25 @@ struct HeicConvertToolView: View {
     var body: some View {
         ZStack {
             AppColors.darkBG.ignoresSafeArea()
-            if done { DoneView(count: phAssets.count, label: "张 HEIC 已转为 JPG", onBack: onDismiss) }
+            if done { DoneView(count: phAssets.count, label: L10n.heicDoneLabel(phAssets.count), onBack: onDismiss) }
             else {
                 VStack(spacing: 0) {
                     SubScreenHeader(title: "HEIC → JPG",
-                                    subtitle: isLoading ? "扫描中…" : "\(phAssets.count) 个文件待转换",
+                                    subtitle: isLoading ? L10n.scanning : L10n.filesToConvert(phAssets.count),
                                     onBack: onDismiss)
 
                     if converting {
                         VStack(spacing: 6) {
-                            Text("转换中… \(Int(progress * 100))%").foregroundColor(.white).fontWeight(.semibold)
+                            Text(L10n.converting(Int(progress * 100))).foregroundColor(AppColors.textPrimary).font(AppTypography.body.weight(.semibold))
                             ProgressView(value: progress).tint(AppColors.purple)
                         }
-                        .padding().background(AppColors.cardBG).cornerRadius(14).padding()
+                        .padding().appleCardStyle().padding()
                     }
 
                     if isLoading {
-                        ToolLoadingView(message: "正在扫描 HEIC 文件…")
+                        ToolLoadingView(message: L10n.scanningHEIC)
                     } else if phAssets.isEmpty {
-                        ToolEmptyView(icon: "checkmark.circle", message: "相册中没有 HEIC 格式照片")
+                        ToolEmptyView(icon: "checkmark.circle", message: L10n.noHEIC)
                     } else {
                         List {
                             ForEach(phAssets, id: \.localIdentifier) { asset in
@@ -42,7 +42,7 @@ struct HeicConvertToolView: View {
                         .listStyle(.plain).background(AppColors.darkBG)
 
                         if !converting {
-                            Button("开始批量转换 \(phAssets.count) 个文件") {
+                            Button(L10n.startConvert(phAssets.count)) {
                                 converting = true
                                 Task {
                                     for i in 0...100 {
@@ -52,9 +52,9 @@ struct HeicConvertToolView: View {
                                     await MainActor.run { done = true }
                                 }
                             }
-                            .frame(maxWidth: .infinity).padding()
-                            .background(AppColors.purple).foregroundColor(.white)
-                            .fontWeight(.bold).cornerRadius(13).padding()
+                            .frame(maxWidth: .infinity)
+                            .buttonStyle(ApplePrimaryButtonStyle())
+                            .padding()
                         }
                     }
                 }
@@ -92,16 +92,16 @@ struct HeicAssetRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            PhotoThumbnail(asset: asset, size: 48).cornerRadius(10)
+            PhotoThumbnail(asset: asset, size: 48).cornerRadius(AppShape.mediaRadius)
             VStack(alignment: .leading, spacing: 2) {
-                Text(assetFilename(asset)).foregroundColor(.white).font(.subheadline).lineLimit(1)
-                Text("\(estimatedSize(asset)) → JPG").font(.caption).foregroundColor(AppColors.green)
+                Text(assetFilename(asset)).foregroundColor(AppColors.textPrimary).font(AppTypography.body).lineLimit(1)
+                Text("\(estimatedSize(asset)) → JPG").font(AppTypography.caption).foregroundColor(AppColors.green)
             }
             Spacer()
             if isDone {
                 Image(systemName: "checkmark.circle.fill").foregroundColor(AppColors.green)
             } else {
-                Text("待转").font(.caption).foregroundColor(AppColors.textTertiary)
+                Text(L10n.pending).font(.caption).foregroundColor(AppColors.textTertiary)
             }
         }
         .padding(.vertical, 4).listRowBackground(AppColors.darkBG)

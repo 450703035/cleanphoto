@@ -448,9 +448,6 @@ class PhotoLibraryService: ObservableObject {
         try await PHPhotoLibrary.shared().performChanges {
             PHAssetChangeRequest.deleteAssets(phAssets as NSArray)
         }
-        // Persist delete history and remove stale score cache
-        await DatabaseService.shared.saveDeleteRecords(assets)
-        await DatabaseService.shared.removeScores(for: assets.map { $0.id })
     }
 
     // MARK: - Convert Live Photo to static

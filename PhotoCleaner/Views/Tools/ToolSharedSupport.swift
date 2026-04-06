@@ -5,7 +5,7 @@ import Photos
 func rowCheck(_ on: Bool, _ color: Color = AppColors.selectionBlue) -> some View {
     ZStack {
         Circle()
-            .stroke(Color.white.opacity(0.95), lineWidth: 1.8)
+            .stroke(AppColors.textPrimary.opacity(0.9), lineWidth: 1.8)
         if on {
             Circle()
                 .fill(color)

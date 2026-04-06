@@ -48,29 +48,55 @@ struct AlbumFolder: Identifiable {
 
 // MARK: - Low quality reason
 enum LowQualityReason: String, CaseIterable {
-    case blurry  = "模糊"
-    case shaky   = "抖动"
-    case exposure = "过曝/过暗"
-    case focusFail = "对焦失败"
+    case blurry  = "blurry"
+    case shaky   = "shaky"
+    case exposure = "exposure"
+    case focusFail = "focusFail"
+
+    var displayName: String {
+        switch self {
+        case .blurry: return L10n.reasonBlurry
+        case .shaky: return L10n.reasonShaky
+        case .exposure: return L10n.reasonExposure
+        case .focusFail: return L10n.reasonFocusFail
+        }
+    }
 }
 
 // MARK: - Screenshot category (local Vision-based)
 enum ScreenshotCategory: String, CaseIterable {
-    case receipt = "收据"
-    case handwriting = "手写"
-    case illustration = "插图"
-    case qrCode = "二维码"
-    case document = "文稿"
-    case other = "其他"
+    case receipt = "receipt"
+    case handwriting = "handwriting"
+    case illustration = "illustration"
+    case qrCode = "qrCode"
+    case document = "document"
+    case other = "other"
 
-    var chipLabel: String { rawValue }
+    var chipLabel: String {
+        switch self {
+        case .receipt: return L10n.catReceipt
+        case .handwriting: return L10n.catHandwriting
+        case .illustration: return L10n.catIllustration
+        case .qrCode: return L10n.catQRCode
+        case .document: return L10n.catDocument
+        case .other: return L10n.catOther
+        }
+    }
 }
 
 // MARK: - Scan state
 enum ScanPhase: String {
-    case idle     = "尚未扫描"
-    case scanning = "分析中…"
-    case done     = "扫描完成"
+    case idle     = "idle"
+    case scanning = "scanning"
+    case done     = "done"
+
+    var displayName: String {
+        switch self {
+        case .idle: return L10n.phaseIdle
+        case .scanning: return L10n.phaseScanning
+        case .done: return L10n.phaseDone
+        }
+    }
 }
 
 // MARK: - Library summary

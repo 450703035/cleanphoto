@@ -69,7 +69,7 @@ struct DuplicatesView: View {
             }
         }
         .navigationBarHidden(true)
-        .overlay((deleting || !mergingGroupIDs.isEmpty) ? ProgressView("处理中…").padding(24).background(AppColors.cardBG).cornerRadius(14) : nil)
+        .overlay((deleting || !mergingGroupIDs.isEmpty) ? ProgressView("处理中…").padding(24).background(AppColors.cardBG).cornerRadius(8) : nil)
         .sheet(item: $viewerRequest) { request in
             if let binding = bindingForGroupAssets(groupID: request.groupID) {
                 FullScreenPhotoViewer(assets: binding, startIndex: request.startIndex)
@@ -128,7 +128,7 @@ struct DuplicateGroupCard: View {
                     } else {
                         Text("合并")
                             .font(.system(size: 12, weight: .bold))
-                            .foregroundColor(AppColors.purple)
+                            .foregroundColor(AppColors.lightPurple)
                     }
                 }
                 .disabled(isMerging)
@@ -201,8 +201,7 @@ struct DuplicateGroupCard: View {
             }
         }
         .padding(12)
-        .background(AppColors.cardBG)
-        .cornerRadius(14)
+        .appleCardStyle()
     }
 }
 
@@ -273,7 +272,7 @@ struct ScreenshotCleanView: View {
                                 let next = !isAllSelected
                                 for i in assets.indices { assets[i].isSelected = next }
                             }
-                                .foregroundColor(AppColors.purple).font(.subheadline)
+                            .foregroundColor(AppColors.lightPurple).font(AppTypography.body)
                         )
                     )
 
@@ -410,8 +409,8 @@ struct VideoCleanView: View {
                                 let next = !isAllSelected
                                 for i in assets.indices { assets[i].isSelected = next }
                             }
-                            .foregroundColor(AppColors.purple)
-                            .font(.subheadline)
+                            .foregroundColor(AppColors.lightPurple)
+                            .font(AppTypography.body)
                         )
                     )
                     InfoBanner(text: "两列浏览；点视频原位小窗播放；点下方圆圈标记后可批量删除", color: AppColors.amber)
@@ -561,7 +560,7 @@ struct VideoGridCell: View {
                 .clipShape(RoundedRectangle(cornerRadius: 12))
                 .overlay(
                     RoundedRectangle(cornerRadius: 12)
-                        .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                        .stroke(AppColors.subtleBorder, lineWidth: 1)
                 )
                 .onTapGesture { onPlayToggle() }
 
@@ -582,7 +581,7 @@ struct VideoGridCell: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(asset.asset.creationDate?.formatted(date: .abbreviated, time: .omitted) ?? "未知日期")
                         .font(.system(size: 12, weight: .semibold))
-                        .foregroundColor(.white)
+                        .foregroundColor(AppColors.textPrimary)
                         .lineLimit(1)
                     Text(asset.formattedSize)
                         .font(.caption)
@@ -624,7 +623,7 @@ struct VideoGridCell: View {
             }
         } else {
             Circle()
-                .stroke(Color.white.opacity(0.9), lineWidth: 2)
+                .stroke(AppColors.textSecondary, lineWidth: 2)
                 .frame(width: 28, height: 28)
                 .background(Circle().fill(Color.black.opacity(0.2)))
         }
@@ -706,8 +705,8 @@ struct LowQualityCleanView: View {
                                 let next = !isAllSelected
                                 for i in assets.indices { assets[i].isSelected = next }
                             }
-                            .foregroundColor(AppColors.purple)
-                            .font(.subheadline)
+                            .foregroundColor(AppColors.lightPurple)
+                            .font(AppTypography.body)
                         )
                     )
 
@@ -849,8 +848,8 @@ struct FavoritesCleanView: View {
                                 let next = !isAllSelected
                                 for i in assets.indices { assets[i].isSelected = next }
                             }
-                            .foregroundColor(AppColors.purple)
-                            .font(.subheadline)
+                            .foregroundColor(AppColors.lightPurple)
+                            .font(AppTypography.body)
                         )
                     )
                     InfoBanner(text: "收藏照片默认不选，避免误删重要内容", color: AppColors.red)
@@ -888,7 +887,7 @@ struct FavoritesCleanView: View {
             }
         }
         .navigationBarHidden(true)
-        .overlay(deleting ? ProgressView("处理中…").padding(24).background(AppColors.cardBG).cornerRadius(14) : nil)
+        .overlay(deleting ? ProgressView("处理中…").padding(24).background(AppColors.cardBG).cornerRadius(8) : nil)
         .sheet(item: $viewerRequest) { request in
             FullScreenPhotoViewer(assets: $assets, startIndex: request.startIndex)
         }
@@ -953,8 +952,8 @@ struct BehaviorCleanView: View {
                                 let next = !isAllSelected
                                 for i in assets.indices { assets[i].isSelected = next }
                             }
-                            .foregroundColor(AppColors.purple)
-                            .font(.subheadline)
+                            .foregroundColor(AppColors.lightPurple)
+                            .font(AppTypography.body)
                         )
                     )
                     InfoBanner(text: filter == .neverViewed ? "iOS 暂不提供“从未查看”公开数据，本筛选暂不可用" : "按使用行为与时间筛选，可手动调整删除对象", color: AppColors.amber)
@@ -1002,7 +1001,7 @@ struct BehaviorCleanView: View {
             }
         }
         .navigationBarHidden(true)
-        .overlay(deleting ? ProgressView("处理中…").padding(24).background(AppColors.cardBG).cornerRadius(14) : nil)
+        .overlay(deleting ? ProgressView("处理中…").padding(24).background(AppColors.cardBG).cornerRadius(8) : nil)
         .sheet(item: $viewerRequest) { request in
             FullScreenPhotoViewer(assets: $assets, startIndex: request.startIndex)
         }
@@ -1026,10 +1025,15 @@ struct InfoBanner: View {
         Text(text)
             .font(.caption)
             .foregroundColor(color)
-            .padding(8)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 9)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(color.opacity(0.08))
-            .cornerRadius(10)
+            .background(AppColors.infoBannerBG)
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(color.opacity(0.35), lineWidth: 0.8)
+            )
+            .cornerRadius(8)
             .padding(.horizontal).padding(.top, 6)
     }
 }
@@ -1041,9 +1045,9 @@ struct FilterChip: View {
     var body: some View {
         Button(action: action) {
             Text(label)
-                .font(.system(size: 12, weight: .semibold))
+                .font(AppTypography.micro.weight(.semibold))
                 .padding(.horizontal, 14).padding(.vertical, 6)
-                .background(isActive ? AppColors.purple : Color.white.opacity(0.07))
+                .background(isActive ? AppColors.purple : AppColors.chipBG)
                 .foregroundColor(isActive ? .white : AppColors.textSecondary)
                 .cornerRadius(20)
         }

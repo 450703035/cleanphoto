@@ -22,7 +22,7 @@ struct TimelineView: View {
                     // ── Main header ──────────────────────────────────────
                     HStack {
                         Text("时间线")
-                            .font(.largeTitle).bold().foregroundColor(.white)
+                            .font(AppTypography.sectionTitle).foregroundColor(AppColors.textPrimary)
                         Spacer()
                         Picker("", selection: $viewMode) {
                             Text("列表").tag(TimelineMode.list)
@@ -40,8 +40,8 @@ struct TimelineView: View {
                     if viewMode == .calendar {
                         HStack(alignment: .center, spacing: 0) {
                             Text("\(calendarYear)年")
-                                .font(.system(size: 15, weight: .bold))
-                                .foregroundColor(AppColors.purple)
+                                .font(.system(size: 17, weight: .semibold))
+                                .foregroundColor(AppColors.lightPurple)
                             Text(vm.yearSize(calendarYear).formattedFileSize)
                                 .font(.system(size: 12))
                                 .foregroundColor(AppColors.textSecondary)
@@ -87,7 +87,7 @@ struct TimelineView: View {
                     if vm.scoringProgress < 1.0 {
                         VStack(spacing: 3) {
                             ProgressView(value: vm.scoringProgress)
-                                .tint(AppColors.purple)
+                                .tint(AppColors.lightPurple)
                                 .padding(.horizontal)
                             Text("照片打分中 \(Int(vm.scoringProgress * 100))%")
                                 .font(.system(size: 10))
@@ -165,7 +165,7 @@ struct TimelineListView: View {
                             HStack(spacing: 6) {
                                 Text("\(year)")
                                     .font(.system(size: 15, weight: .bold))
-                                    .foregroundColor(.white)
+                                    .foregroundColor(AppColors.textPrimary)
                                 Text(vm.yearSize(year).formattedFileSize)
                                     .font(.system(size: 11))
                                     .foregroundColor(AppColors.textSecondary)
@@ -237,7 +237,7 @@ struct TimelineListView: View {
                 HStack(spacing: 6) {
                     Text("\(year)")
                         .font(.system(size: 15, weight: .bold))
-                        .foregroundColor(.white)
+                        .foregroundColor(AppColors.textPrimary)
                     Text(vm.yearSize(year).formattedFileSize)
                         .font(.system(size: 11))
                         .foregroundColor(AppColors.textSecondary)
@@ -296,7 +296,7 @@ struct TimelineWaterfallView: View {
                                 }
                             }
                             .font(.subheadline)
-                            .foregroundColor(AppColors.purple)
+                            .foregroundColor(AppColors.lightPurple)
                         }
                         .padding(.horizontal, 12)
                         .padding(.vertical, 8)
@@ -354,7 +354,7 @@ struct TimelineWaterfallView: View {
                                 HStack(spacing: 6) {
                                     Text(section.title)
                                         .font(.system(size: 14, weight: .bold))
-                                        .foregroundColor(.white)
+                                        .foregroundColor(AppColors.textPrimary)
                                     Text(section.totalBytes.formattedFileSize)
                                         .font(.system(size: 11))
                                         .foregroundColor(AppColors.textSecondary)
@@ -517,7 +517,7 @@ private struct TimelineWaterfallCell: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("\(asset.formattedSize) · \(captureTime(asset.asset))")
                         .font(.system(size: 10, weight: .semibold))
-                        .foregroundColor(.white)
+                        .foregroundColor(AppColors.textPrimary)
                         .lineLimit(1)
                     Text(locationText(asset.asset))
                         .font(.system(size: 9))
@@ -608,7 +608,7 @@ private struct TimelineWaterfallCell: View {
             }
         } else {
             Circle()
-                .stroke(Color.white.opacity(0.9), lineWidth: 2)
+                .stroke(AppColors.textSecondary, lineWidth: 2)
                 .frame(width: 22, height: 22)
                 .background(Circle().fill(Color.black.opacity(0.2)))
         }

@@ -54,13 +54,18 @@ struct ScanIdleView: View {
     var body: some View {
         VStack(spacing: 0) {
             Spacer()
-            Text("AI 清理").font(.largeTitle).bold().foregroundColor(.white)
-            Text("智能分析你的相册").font(.subheadline).foregroundColor(AppColors.textSecondary).padding(.top, 4)
+            Text(L10n.aiClean)
+                .font(AppTypography.hero)
+                .foregroundColor(AppColors.textPrimary)
+            Text(L10n.smartAnalyze)
+                .font(AppTypography.body)
+                .foregroundColor(AppColors.textSecondary)
+                .padding(.top, 4)
             Spacer().frame(height: 40)
 
             // Animated ring
             ZStack {
-                Circle().stroke(Color.white.opacity(0.05), lineWidth: 2).frame(width: 240)
+                Circle().stroke(AppColors.separator, lineWidth: 2).frame(width: 240)
                 Circle().stroke(AppColors.purple.opacity(0.15), lineWidth: 1.5).frame(width: 200)
                 ZStack {
                     Circle().fill(AppColors.cardBG).frame(width: 164)
@@ -76,8 +81,8 @@ struct ScanIdleView: View {
 
                 VStack(spacing: 6) {
                     Image(systemName: "camera.fill").font(.system(size: 38)).foregroundColor(AppColors.purple)
-                    Text("尚未扫描").font(.system(size: 15, weight: .bold)).foregroundColor(.white)
-                    Text("点击开始").font(.caption).foregroundColor(AppColors.textSecondary)
+                    Text(L10n.notScanned).font(.system(size: 17, weight: .semibold)).foregroundColor(AppColors.textPrimary)
+                    Text(L10n.tapToStart).font(AppTypography.caption).foregroundColor(AppColors.textSecondary)
                 }
             }
             .onAppear { rotate = true }
@@ -85,23 +90,19 @@ struct ScanIdleView: View {
             Spacer().frame(height: 32)
 
             Button(action: onStart) {
-                Text("开始扫描")
-                    .font(.system(size: 16, weight: .bold))
+                Text(L10n.startScan)
                     .frame(maxWidth: .infinity)
-                    .padding()
-                    .background(AppColors.purple)
-                    .foregroundColor(.white)
-                    .cornerRadius(16)
             }
+            .buttonStyle(ApplePrimaryButtonStyle())
             .padding(.horizontal, 48)
 
             Spacer().frame(height: 24)
 
             VStack(spacing: 6) {
-                Text("无需逐张选择，AI自动推荐")
-                    .font(.subheadline).bold().foregroundColor(.white.opacity(0.85))
-                Text("我们将引导您安全删除无用照片")
-                    .font(.caption).foregroundColor(AppColors.textSecondary)
+                Text(L10n.noManualPick)
+                    .font(AppTypography.body.weight(.semibold)).foregroundColor(AppColors.textPrimary)
+                Text(L10n.safeDeleteGuide)
+                    .font(AppTypography.caption).foregroundColor(AppColors.textSecondary)
             }
             Spacer()
         }
@@ -115,8 +116,8 @@ struct ScanningView: View {
     var body: some View {
         VStack(spacing: 0) {
             Spacer()
-            Text("AI 清理").font(.largeTitle).bold().foregroundColor(.white)
-            Text(vm.phaseLabel).font(.subheadline).foregroundColor(AppColors.purple).padding(.top, 4)
+            Text(L10n.aiClean).font(AppTypography.hero).foregroundColor(AppColors.textPrimary)
+            Text(vm.phaseLabel).font(AppTypography.caption).foregroundColor(AppColors.lightPurple).padding(.top, 4)
             Spacer().frame(height: 32)
 
             PhotoSphereView(assets: Array(vm.allAssets.prefix(40).map { $0.asset }))
@@ -126,39 +127,33 @@ struct ScanningView: View {
 
             VStack(spacing: 8) {
                 Text("\(Int(vm.progress * 100))%")
-                    .font(.system(size: 22, weight: .bold))
-                    .foregroundColor(.white)
+                    .font(.system(size: 21, weight: .semibold))
+                    .foregroundColor(AppColors.textPrimary)
                 ProgressView(value: vm.progress)
                     .tint(AppColors.purple)
                     .padding(.horizontal, 40)
-                Text("已分析 \(vm.analyzedCount) 张照片")
-                    .font(.caption)
+                Text(L10n.analyzedPhotos(vm.analyzedCount))
+                    .font(AppTypography.caption)
                     .foregroundColor(AppColors.textSecondary)
-                Text("已用时 \(vm.scanElapsedText)")
-                    .font(.caption)
+                Text(L10n.elapsedTime(vm.scanElapsedText))
+                    .font(AppTypography.caption)
                     .foregroundColor(AppColors.textSecondary)
             }
 
             Spacer().frame(height: 28)
             VStack(spacing: 6) {
-                Text("无需逐张选择，AI自动推荐")
-                    .font(.subheadline).bold().foregroundColor(.white.opacity(0.85))
-                Text("我们将引导您安全删除无用照片")
-                    .font(.caption).foregroundColor(AppColors.textSecondary)
+                Text(L10n.noManualPick)
+                    .font(AppTypography.body.weight(.semibold)).foregroundColor(AppColors.textPrimary)
+                Text(L10n.safeDeleteGuide)
+                    .font(AppTypography.caption).foregroundColor(AppColors.textSecondary)
             }
 
             // Cancel button — vm.reset() calls scanTask?.cancel() then returns to idle
             Button(action: vm.reset) {
-                Text("取消扫描")
-                    .font(.subheadline)
-                    .foregroundColor(AppColors.textSecondary)
-                    .padding(.vertical, 10)
-                    .padding(.horizontal, 28)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 20)
-                            .stroke(Color.white.opacity(0.15), lineWidth: 1)
-                    )
+                Text(L10n.cancelScan)
+                    .foregroundColor(AppColors.lightPurple)
             }
+            .buttonStyle(AppleOutlineButtonStyle())
             .padding(.top, 20)
 
             Spacer()
@@ -385,10 +380,10 @@ struct ResultDashboard: View {
                 // Header
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("AI 清理").font(.largeTitle).bold().foregroundColor(.white)
+                        Text(L10n.aiClean).font(.largeTitle).bold().foregroundColor(AppColors.textPrimary)
                         Text(vm.isBackgroundAnalyzing
-                             ? "后台分析中 · 已用时 \(vm.scanElapsedText)"
-                             : "本次扫描总耗时：\(vm.lastScanDurationText)")
+                             ? L10n.bgAnalyzingElapsed(vm.scanElapsedText)
+                             : L10n.totalScanTime(vm.lastScanDurationText))
                             .font(.caption)
                             .foregroundColor(AppColors.textSecondary)
                     }
@@ -409,7 +404,7 @@ struct ResultDashboard: View {
                 if vm.isBackgroundAnalyzing {
                     VStack(alignment: .leading, spacing: 6) {
                         HStack {
-                            Text(vm.backgroundLabel.isEmpty ? "后台分析中" : vm.backgroundLabel)
+                            Text(vm.backgroundLabel.isEmpty ? L10n.bgAnalyzing : vm.backgroundLabel)
                                 .font(.caption)
                                 .foregroundColor(AppColors.purple)
                             Spacer()
@@ -426,46 +421,51 @@ struct ResultDashboard: View {
 
                 // Suggestions
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("智能建议 · 点击进入")
+                    Text(L10n.smartSuggestions)
                         .font(.caption).fontWeight(.semibold)
                         .foregroundColor(AppColors.textSecondary)
                         .textCase(.uppercase)
                         .padding(.horizontal)
                         .padding(.top, 12)
 
-                    SuggestionCard(icon: "arrow.triangle.2.circlepath", iconBg: AppColors.purple.opacity(0.2),
-                                   title: "重复与相似照片",
-                                   desc: "\(vm.duplicateGroups.count)组重复 · \(vm.similarGroups.count)组相似",
-                                   size: ByteCountFormatter.string(fromByteCount: vm.duplicateGroups.flatMap{$0.assets.dropFirst()}.reduce(0){$0+$1.sizeBytes}, countStyle: .file)) {
+                    SuggestionCard(icon: "arrow.triangle.2.circlepath", iconBg: AppColors.purple,
+                                   title: L10n.duplicateAndSimilar,
+                                   desc: L10n.dupDesc(vm.duplicateGroups.count, vm.similarGroups.count),
+                                   size: ByteCountFormatter.string(
+                                    fromByteCount: (vm.duplicateGroups + vm.similarGroups)
+                                        .flatMap { $0.assets.dropFirst() }
+                                        .reduce(0) { $0 + $1.sizeBytes },
+                                    countStyle: .file
+                                   )) {
                         navPath.append(.duplicates)
                     }
-                    SuggestionCard(icon: "camera.viewfinder", iconBg: AppColors.red.opacity(0.2),
-                                   title: "截图清理",
-                                   desc: "\(vm.screenshots.count)张截图 · 已自动分析",
+                    SuggestionCard(icon: "camera.viewfinder", iconBg: AppColors.red,
+                                   title: L10n.screenshotClean,
+                                   desc: L10n.screenshotDesc(vm.screenshots.count),
                                    size: ByteCountFormatter.string(fromByteCount: vm.screenshots.reduce(0){$0+$1.sizeBytes}, countStyle: .file)) {
                         navPath.append(.screenshots)
                     }
-                    SuggestionCard(icon: "video.fill", iconBg: AppColors.amber.opacity(0.2),
-                                   title: "大视频文件",
-                                   desc: "\(vm.videos.count)个视频，按大小排序",
+                    SuggestionCard(icon: "video.fill", iconBg: AppColors.amber,
+                                   title: L10n.largeVideos,
+                                   desc: L10n.videoDesc(vm.videos.count),
                                    size: ByteCountFormatter.string(fromByteCount: vm.videos.reduce(0){$0+$1.sizeBytes}, countStyle: .file)) {
                         navPath.append(.videos)
                     }
-                    SuggestionCard(icon: "star.slash.fill", iconBg: AppColors.green.opacity(0.2),
-                                   title: "低质量照片",
-                                   desc: "模糊/抖动/曝光/对焦失败 \(vm.lowQuality.count)张",
+                    SuggestionCard(icon: "star.slash.fill", iconBg: AppColors.green,
+                                   title: L10n.lowQualityPhotos,
+                                   desc: L10n.lowQualityDesc(vm.lowQuality.count),
                                    size: ByteCountFormatter.string(fromByteCount: vm.lowQuality.reduce(0){$0+$1.sizeBytes}, countStyle: .file)) {
                         navPath.append(.lowQuality)
                     }
-                    SuggestionCard(icon: "clock.arrow.trianglehead.counterclockwise.rotate.90", iconBg: AppColors.amber.opacity(0.2),
-                                   title: "其他使用行为",
-                                   desc: "从未查看/很久没看/按年限筛选",
+                    SuggestionCard(icon: "clock.arrow.trianglehead.counterclockwise.rotate.90", iconBg: AppColors.amber,
+                                   title: L10n.otherBehavior,
+                                   desc: L10n.behaviorDesc,
                                    size: ByteCountFormatter.string(fromByteCount: vm.behaviorAssets.reduce(0){$0+$1.sizeBytes}, countStyle: .file)) {
                         navPath.append(.behavior)
                     }
-                    SuggestionCard(icon: "heart.fill", iconBg: AppColors.red.opacity(0.2),
-                                   title: "收藏照片",
-                                   desc: "\(vm.favorites.count)张 · 默认不选择",
+                    SuggestionCard(icon: "heart.fill", iconBg: AppColors.red,
+                                   title: L10n.favoritePhotos,
+                                   desc: L10n.favoriteDesc(vm.favorites.count),
                                    size: ByteCountFormatter.string(fromByteCount: vm.favorites.reduce(0){$0+$1.sizeBytes}, countStyle: .file)) {
                         navPath.append(.favorites)
                     }
@@ -485,7 +485,7 @@ struct HealthCard: View {
     var body: some View {
         HStack(spacing: 16) {
             ZStack {
-                Circle().stroke(Color.white.opacity(0.1), lineWidth: 5).frame(width: ringSize)
+                Circle().stroke(AppColors.separator, lineWidth: 5).frame(width: ringSize)
                 Circle()
                     .trim(from: 0, to: Double(summary.healthScore) / 100)
                     .stroke(
@@ -495,13 +495,13 @@ struct HealthCard: View {
                     .frame(width: ringSize)
                     .rotationEffect(.degrees(-90))
                 Text("\(summary.healthScore)")
-                    .font(.system(size: 17, weight: .bold)).foregroundColor(.white)
+                    .font(.system(size: 17, weight: .bold)).foregroundColor(AppColors.textPrimary)
             }
 
             VStack(spacing: 5) {
-                row("📸 照片总数", "\(summary.totalCount) 张")
-                row("💾 占用空间", summary.formattedTotal)
-                row("🧹 可释放", summary.formattedFreeable, accent: true)
+                row("📸 \(L10n.totalPhotos)", "\(summary.totalCount)")
+                row("💾 \(L10n.storageUsed)", summary.formattedTotal)
+                row("🧹 \(L10n.freeable)", summary.formattedFreeable, accent: true)
             }
         }
         .padding()
@@ -515,7 +515,7 @@ struct HealthCard: View {
             Text(label).font(.caption).foregroundColor(AppColors.textSecondary)
             Spacer()
             Text(value).font(.caption).fontWeight(.semibold)
-                .foregroundColor(accent ? AppColors.lightPurple : .white)
+                .foregroundColor(accent ? AppColors.lightPurple : AppColors.textPrimary)
         }
     }
 }
@@ -527,7 +527,7 @@ struct SpaceBar: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("空间分布").font(.caption).fontWeight(.semibold)
+            Text(L10n.spaceDistribution).font(.caption).fontWeight(.semibold)
                 .foregroundColor(AppColors.textSecondary).textCase(.uppercase)
 
             GeometryReader { geo in
@@ -536,7 +536,7 @@ struct SpaceBar: View {
                     seg(summary.screenshotBytes, color: AppColors.red,     width: geo.size.width)
                     seg(summary.livePhotoBytes,  color: AppColors.amber,   width: geo.size.width)
                     seg(summary.photoBytes,      color: AppColors.green,   width: geo.size.width)
-                    Rectangle().fill(Color.white.opacity(0.08)).cornerRadius(2)
+                    Rectangle().fill(AppColors.separator).cornerRadius(2)
                 }
                 .frame(height: 7)
                 .cornerRadius(4)
@@ -545,10 +545,10 @@ struct SpaceBar: View {
 
             HStack(spacing: 0) {
                 ForEach([
-                    (AppColors.purple, "视频"),
-                    (AppColors.red, "截图"),
+                    (AppColors.purple, L10n.video),
+                    (AppColors.red, L10n.screenshot),
                     (AppColors.amber, "Live"),
-                    (AppColors.green, "照片")
+                    (AppColors.green, L10n.photo)
                 ], id: \.1) { color, label in
                     HStack(spacing: 4) {
                         Circle().fill(color).frame(width: 7, height: 7)
@@ -586,7 +586,7 @@ struct SuggestionCard: View {
                     .cornerRadius(11)
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(title).font(.subheadline).fontWeight(.semibold).foregroundColor(.white)
+                    Text(title).font(.subheadline).fontWeight(.semibold).foregroundColor(AppColors.textPrimary)
                     Text(desc).font(.caption).foregroundColor(AppColors.textSecondary)
                 }
                 Spacer()
@@ -594,9 +594,9 @@ struct SuggestionCard: View {
                 Image(systemName: "chevron.right").font(.caption).foregroundColor(AppColors.textTertiary)
             }
             .padding(12)
-            .background(Color.white.opacity(0.04))
-            .cornerRadius(14)
-            .overlay(RoundedRectangle(cornerRadius: 14).stroke(AppColors.subtleBorder, lineWidth: 0.5))
+            .background(AppColors.deepCard)
+            .cornerRadius(8)
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(AppColors.subtleBorder, lineWidth: 0.5))
         }
         .padding(.horizontal)
     }

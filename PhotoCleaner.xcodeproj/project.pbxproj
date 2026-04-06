@@ -29,6 +29,7 @@
 		A020 /* SmartAlbumToolView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F020 /* SmartAlbumToolView.swift */; };
 		A021 /* SwipeDeleteToolView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F021 /* SwipeDeleteToolView.swift */; };
 		A022 /* ToolSharedSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = F022 /* ToolSharedSupport.swift */; };
+		A023 /* L10n.swift in Sources */ = {isa = PBXBuildFile; fileRef = F023 /* L10n.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -54,6 +55,7 @@
 		F020 /* SmartAlbumToolView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SmartAlbumToolView.swift; sourceTree = "<group>"; };
 		F021 /* SwipeDeleteToolView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwipeDeleteToolView.swift; sourceTree = "<group>"; };
 		F022 /* ToolSharedSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolSharedSupport.swift; sourceTree = "<group>"; };
+		F023 /* L10n.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = L10n.swift; sourceTree = "<group>"; };
 		FAPP /* PhotoCleaner.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PhotoCleaner.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -74,6 +76,7 @@
 				F001 /* PhotoCleanerApp.swift */,
 				F002 /* ContentView.swift */,
 				F003 /* AppConstants.swift */,
+				F023 /* L10n.swift */,
 			);
 			path = App;
 			sourceTree = "<group>";
@@ -277,6 +280,7 @@
 				A020 /* SmartAlbumToolView.swift in Sources */,
 				A021 /* SwipeDeleteToolView.swift in Sources */,
 				A022 /* ToolSharedSupport.swift in Sources */,
+				A023 /* L10n.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -19,22 +19,22 @@ struct LivePhotoToolView: View {
         ZStack(alignment: .bottom) {
             AppColors.darkBG.ignoresSafeArea()
             if done {
-                DoneView(count: selected.count, label: "个 Live Photo 已转换", onBack: onDismiss)
+                DoneView(count: selected.count, label: L10n.livePhotoDone(selected.count), onBack: onDismiss)
             } else {
                 VStack(spacing: 0) {
                     SubScreenHeader(
-                        title: "Live Photo → 静态",
-                        subtitle: isLoading ? "加载中…" : "\(phAssets.count) 个 · 可省约 \(ByteCountFormatter.string(fromByteCount: totalSavedBytes, countStyle: .file))",
+                        title: L10n.liveToStatic,
+                        subtitle: isLoading ? L10n.loading : L10n.livePhotoSubtitle(phAssets.count, ByteCountFormatter.string(fromByteCount: totalSavedBytes, countStyle: .file)),
                         onBack: onDismiss
                     )
-                    Text("转换为静态照片可节省约 55% 空间，动态效果将移除")
-                        .font(.caption).foregroundColor(AppColors.textSecondary)
+                    Text(L10n.livePhotoNote)
+                        .font(AppTypography.caption).foregroundColor(AppColors.textSecondary)
                         .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal).padding(.top, 8)
 
                     if isLoading {
-                        ToolLoadingView(message: "正在加载 Live Photo…")
+                        ToolLoadingView(message: L10n.loadingLivePhoto)
                     } else if phAssets.isEmpty {
-                        ToolEmptyView(icon: "photo.on.rectangle", message: "相册中没有 Live Photo")
+                        ToolEmptyView(icon: "photo.on.rectangle", message: L10n.noLivePhoto)
                     } else {
                         List {
                             ForEach(phAssets, id: \.localIdentifier) { asset in
@@ -52,7 +52,7 @@ struct LivePhotoToolView: View {
                     BottomDeleteBar(
                         count: selected.count,
                         sizeLabel: ByteCountFormatter.string(fromByteCount: totalSavedBytes, countStyle: .file),
-                        actionLabel: "转换所选",
+                        actionLabel: L10n.convertSelected,
                         color: AppColors.purple
                     ) {
                         Task {
@@ -92,13 +92,13 @@ struct LivePhotoRow: View {
     var body: some View {
         HStack(spacing: 12) {
             ZStack(alignment: .bottomTrailing) {
-                PhotoThumbnail(asset: asset, size: 52).cornerRadius(10)
+                PhotoThumbnail(asset: asset, size: 52).cornerRadius(AppShape.mediaRadius)
                 Text("LIVE").font(.system(size: 7, weight: .bold)).foregroundColor(.white)
-                    .padding(2).background(AppColors.purple).cornerRadius(3).padding(2)
+                    .padding(2).background(AppColors.purple).cornerRadius(AppShape.iconRadius).padding(2)
             }
             VStack(alignment: .leading, spacing: 2) {
-                Text(assetFilename(asset)).foregroundColor(.white).font(.subheadline).fontWeight(.semibold).lineLimit(1)
-                Text("约 \(sizeStr) · 节省约 \(savedStr)").font(.caption).foregroundColor(AppColors.textSecondary)
+                Text(assetFilename(asset)).foregroundColor(AppColors.textPrimary).font(AppTypography.body.weight(.semibold)).lineLimit(1)
+                Text(L10n.approxSave(sizeStr, savedStr)).font(AppTypography.caption).foregroundColor(AppColors.textSecondary)
             }
             Spacer()
             rowCheck(isSelected)

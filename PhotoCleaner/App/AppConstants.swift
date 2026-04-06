@@ -1,22 +1,122 @@
 import SwiftUI
+import UIKit
+
+enum AppThemeMode: String, CaseIterable, Identifiable {
+    case system
+    case light
+    case dark
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .system: return L10n.themeSystem
+        case .light: return L10n.themeLight
+        case .dark: return L10n.themeDark
+        }
+    }
+
+    var colorScheme: ColorScheme? {
+        switch self {
+        case .system: return nil
+        case .light: return .light
+        case .dark: return .dark
+        }
+    }
+}
 
 // MARK: - Colors
 enum AppColors {
-    static let purple     = Color(hex: "7c6ff7")
-    static let lightPurple = Color(hex: "a78bfa")
-    static let darkBG     = Color(hex: "0f0f1a")
-    static let cardBG     = Color(hex: "1a1730")
-    static let deepCard   = Color(hex: "12122a")
+    static let purple     = Color(hex: "0071e3")
+    static let lightPurple = Color(hex: "2997ff")
+    static let darkBG     = Color(lightHex: "f5f5f7", darkHex: "000000")
+    static let cardBG     = Color(lightHex: "ffffff", darkHex: "1d1d1f")
+    static let deepCard   = Color(lightHex: "ffffff", darkHex: "272729")
     static let red        = Color(hex: "ef4444")
     static let green      = Color(hex: "22c55e")
     static let amber      = Color(hex: "f59e0b")
-    static let blue       = Color(hex: "378add")
+    static let blue       = Color(hex: "0066cc")
     static let selectionBlue = Color(hex: "0A84FF")
-    static let textPrimary   = Color.white
-    static let textSecondary = Color.white.opacity(0.55)
-    static let textTertiary  = Color.white.opacity(0.35)
-    static let separator     = Color.white.opacity(0.06)
-    static let subtleBorder  = Color.white.opacity(0.08)
+    static let textPrimary   = Color(lightHex: "1d1d1f", darkHex: "ffffff")
+    static let textSecondary = Color(lightHex: "3c3c43", darkHex: "ffffff", lightAlpha: 0.78, darkAlpha: 0.74)
+    static let textTertiary  = Color(lightHex: "3c3c43", darkHex: "ffffff", lightAlpha: 0.52, darkAlpha: 0.52)
+    static let separator     = Color(lightHex: "000000", darkHex: "ffffff", lightAlpha: 0.10, darkAlpha: 0.12)
+    static let subtleBorder  = Color(lightHex: "000000", darkHex: "ffffff", lightAlpha: 0.14, darkAlpha: 0.18)
+
+    static let lightSectionBG = Color(hex: "f5f5f7")
+    static let lightTextPrimary = Color(hex: "1d1d1f")
+    static let lightTextSecondary = Color.black.opacity(0.8)
+    static let chipBG = Color(lightHex: "ffffff", darkHex: "ffffff", lightAlpha: 0.92, darkAlpha: 0.10)
+    static let infoBannerBG = Color(lightHex: "ffffff", darkHex: "000000", lightAlpha: 0.92, darkAlpha: 0.18)
+}
+
+enum AppTypography {
+    static let hero = Font.system(size: 40, weight: .semibold, design: .default)
+    static let sectionTitle = Font.system(size: 28, weight: .semibold, design: .default)
+    static let body = Font.system(size: 17, weight: .regular, design: .default)
+    static let caption = Font.system(size: 14, weight: .regular, design: .default)
+    static let micro = Font.system(size: 12, weight: .regular, design: .default)
+}
+
+enum AppShape {
+    static let cardRadius: CGFloat = 8
+    static let mediaRadius: CGFloat = 8
+    static let iconRadius: CGFloat = 7
+    static let pillRadius: CGFloat = 980
+    static let borderWidth: CGFloat = 0.5
+}
+
+struct ApplePrimaryButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(AppTypography.body.weight(.medium))
+            .padding(.horizontal, 18)
+            .padding(.vertical, 9)
+            .foregroundColor(.white)
+            .background(
+                RoundedRectangle(cornerRadius: AppShape.pillRadius)
+                    .fill(configuration.isPressed ? AppColors.lightPurple : AppColors.purple)
+            )
+            .scaleEffect(configuration.isPressed ? 0.985 : 1.0)
+            .animation(.easeOut(duration: 0.16), value: configuration.isPressed)
+    }
+}
+
+struct AppleOutlineButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(AppTypography.body.weight(.regular))
+            .padding(.horizontal, 18)
+            .padding(.vertical, 9)
+            .foregroundColor(AppColors.lightPurple)
+            .background(
+                RoundedRectangle(cornerRadius: AppShape.pillRadius)
+                    .stroke(AppColors.lightPurple, lineWidth: 1)
+                    .background(
+                        RoundedRectangle(cornerRadius: AppShape.pillRadius)
+                            .fill(Color.white.opacity(configuration.isPressed ? 0.12 : 0.02))
+                    )
+            )
+            .animation(.easeOut(duration: 0.16), value: configuration.isPressed)
+    }
+}
+
+struct AppleCardModifier: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .background(AppColors.deepCard)
+            .cornerRadius(AppShape.cardRadius)
+            .overlay(
+                RoundedRectangle(cornerRadius: AppShape.cardRadius)
+                    .stroke(AppColors.subtleBorder, lineWidth: AppShape.borderWidth)
+            )
+    }
+}
+
+extension View {
+    func appleCardStyle() -> some View {
+        modifier(AppleCardModifier())
+    }
 }
 
 // MARK: - Score helpers
@@ -30,15 +130,26 @@ extension Int {
     }
     var scoreLabel: String {
         switch self {
-        case ..<40: return "推荐删除"
-        case 40..<70: return "可选保留"
-        default: return "建议保留"
+        case ..<40: return L10n.scoreDeleteRecommended
+        case 40..<70: return L10n.scoreOptionalKeep
+        default: return L10n.scoreKeepRecommended
         }
     }
 }
 
 // MARK: - Color hex init
 extension Color {
+    init(lightHex: String, darkHex: String, lightAlpha: CGFloat = 1.0, darkAlpha: CGFloat = 1.0) {
+        self.init(
+            UIColor { trait in
+                if trait.userInterfaceStyle == .dark {
+                    return UIColor(hex: darkHex, alpha: darkAlpha)
+                }
+                return UIColor(hex: lightHex, alpha: lightAlpha)
+            }
+        )
+    }
+
     init(hex: String) {
         let hex = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
         var int: UInt64 = 0
@@ -61,6 +172,30 @@ extension Color {
             blue: Double(b) / 255,
             opacity: Double(a) / 255
         )
+    }
+}
+
+extension UIColor {
+    convenience init(hex: String, alpha: CGFloat = 1.0) {
+        let hex = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
+        var int: UInt64 = 0
+        Scanner(string: hex).scanHexInt64(&int)
+        let r, g, b: CGFloat
+        switch hex.count {
+        case 3:
+            r = CGFloat((int >> 8) * 17) / 255
+            g = CGFloat((int >> 4 & 0xF) * 17) / 255
+            b = CGFloat((int & 0xF) * 17) / 255
+        case 6, 8:
+            r = CGFloat((int >> 16) & 0xFF) / 255
+            g = CGFloat((int >> 8) & 0xFF) / 255
+            b = CGFloat(int & 0xFF) / 255
+        default:
+            r = 0
+            g = 0
+            b = 0
+        }
+        self.init(red: r, green: g, blue: b, alpha: alpha)
     }
 }
 
