@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(xcodebuild -scheme PhotoCleaner -destination 'platform=iOS Simulator,name=iPhone 16' build)",
+      "Bash(sudo xcode-select:*)",
+      "Bash(DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -scheme PhotoCleaner -destination 'platform=iOS Simulator,name=iPhone 16' build)",
+      "Bash(DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -scheme PhotoCleaner -destination 'generic/platform=iOS Simulator' build)",
+      "Bash(find /Users/danny/PhotoCleaner -type f -name \"*.swift\" -exec wc -l {} +)",
+      "Bash(wc -l /Users/danny/PhotoCleaner/PhotoCleaner/**/*.swift)"
+    ]
+  }
+}
