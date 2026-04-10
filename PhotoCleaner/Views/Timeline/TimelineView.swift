@@ -14,6 +14,15 @@ struct TimelineView: View {
 
     enum TimelineMode { case list, calendar, waterfall }
 
+    private var shouldShowScoringBar: Bool {
+        vm.isLoading || (vm.scoringProgress < 1.0)
+    }
+
+    private var displayProgress: Double {
+        if vm.isLoading && vm.scoringProgress >= 1.0 { return 0.99 }
+        return min(max(vm.scoringProgress, 0), 1.0)
+    }
+
     var body: some View {
         NavigationStack {
             ZStack {
@@ -84,22 +93,23 @@ struct TimelineView: View {
                     }
 
                     // ── Scoring progress bar ─────────────────────────────
-                    if vm.scoringProgress < 1.0 {
+                    if shouldShowScoringBar {
                         VStack(spacing: 3) {
-                            ProgressView(value: vm.scoringProgress)
+                            ProgressView(value: displayProgress)
                                 .tint(AppColors.lightPurple)
                                 .padding(.horizontal)
-                            Text("照片打分中 \(Int(vm.scoringProgress * 100))%")
+                            Text(vm.isLoading && vm.scoringProgress >= 1.0
+                                 ? "数据刷新中…"
+                                 : "照片打分中 \(Int(displayProgress * 100))%")
                                 .font(.system(size: 10))
                                 .foregroundColor(AppColors.textSecondary)
                         }
                         .padding(.bottom, 6)
-                        .transition(.opacity)
                     }
 
-                    if vm.isLoading {
+                    if vm.isLoading && vm.allAssets.isEmpty {
                         Spacer()
-                        ProgressView("加载中…").foregroundColor(AppColors.textSecondary)
+                        TimelineLoadingPlaceholder(mode: viewMode)
                         Spacer()
                     } else if viewMode == .list {
                         TimelineListView(vm: vm, onFolderTap: { selectedFolder = $0 })
@@ -120,6 +130,32 @@ struct TimelineView: View {
             }
             .task { await vm.load() }
         }
+    }
+}
+
+private struct TimelineLoadingPlaceholder: View {
+    let mode: TimelineView.TimelineMode
+
+    var body: some View {
+        VStack(spacing: 12) {
+            ProgressView("正在加载时间线…")
+                .foregroundColor(AppColors.textSecondary)
+            if mode != .calendar {
+                VStack(spacing: 8) {
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(AppColors.cardBG.opacity(0.7))
+                        .frame(height: 18)
+                    HStack(spacing: 8) {
+                        RoundedRectangle(cornerRadius: 10).fill(AppColors.cardBG.opacity(0.7))
+                        RoundedRectangle(cornerRadius: 10).fill(AppColors.cardBG.opacity(0.7))
+                        RoundedRectangle(cornerRadius: 10).fill(AppColors.cardBG.opacity(0.7))
+                    }
+                    .frame(height: 110)
+                }
+                .padding(.horizontal, 16)
+            }
+        }
+        .frame(maxWidth: .infinity)
     }
 }
 
@@ -671,7 +707,6 @@ struct CalendarContainerView: View {
     @Binding var visibleYear: Int
 
     // 3 years back → 2 years ahead (60 months total).
-    // Using regular VStack (not Lazy) so ScrollViewReader.scrollTo works reliably.
     private static let months: [Date] = {
         let cal = Calendar.current
         let now = cal.date(from: cal.dateComponents([.year, .month], from: Date()))!
@@ -687,17 +722,22 @@ struct CalendarContainerView: View {
         let nowMonth = cal.date(from: cal.dateComponents([.year, .month], from: Date()))!
         return cal.date(byAdding: .month, value: -1, to: nowMonth) ?? nowMonth
     }()
+    @State private var didInitialScroll = false
 
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
+                let maxDaySize = vm.maxDaySize
                 // Sticky weekday header
                 LazyVStack(spacing: 0, pinnedViews: .sectionHeaders) {
                     Section {
+                        // Lazy month blocks: avoids building all month grids at once
+                        // when switching from list/waterfall to calendar.
                         LazyVStack(spacing: 0) {
                             ForEach(Self.months, id: \.self) { month in
                                 CalendarMonthBlock(month: month, vm: vm, onDayTap: onDayTap,
-                                                   visibleYear: $visibleYear)
+                                                   visibleYear: $visibleYear,
+                                                   maxDaySize: maxDaySize)
                                     .id(month)
                             }
                         }
@@ -717,6 +757,8 @@ struct CalendarContainerView: View {
                 }
             }
             .onAppear {
+                guard !didInitialScroll else { return }
+                didInitialScroll = true
                 // Slight delay ensures the VStack is fully laid out before scrolling
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
                     proxy.scrollTo(Self.previousMonth, anchor: .top)
@@ -733,6 +775,7 @@ struct CalendarMonthBlock: View {
     @ObservedObject var vm: LibraryViewModel
     let onDayTap: (DayInfo) -> Void
     @Binding var visibleYear: Int
+    let maxDaySize: Int64
 
     private let calendar = Calendar.current
     private let cols = Array(repeating: GridItem(.flexible(), spacing: 2), count: 7)
@@ -782,7 +825,7 @@ struct CalendarMonthBlock: View {
                             month: monthN - 1,
                             info: vm.dayInfo(year: year, month: monthN - 1, day: day),
                             isToday: isToday(day: day),
-                            maxDaySize: vm.maxDaySize,
+                            maxDaySize: maxDaySize,
                             onTap: onDayTap
                         )
                     }

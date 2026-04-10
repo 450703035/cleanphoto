@@ -30,21 +30,24 @@ struct DuplicatesView: View {
                     SubScreenHeader(title: "重复与相似",
                                     subtitle: "\(groups.count) 组",
                                     onBack: { dismiss() })
+                    InfoBanner(text: "左滑整组卡片可取消合并，不删除，并转入“其他使用行为”", color: AppColors.amber)
 
                     ScrollView {
                         LazyVStack(spacing: 16) {
                             ForEach(groups) { group in
-                                DuplicateGroupCard(
-                                    group: group,
-                                    isMerging: mergingGroupIDs.contains(group.id),
-                                    onMerge: { merge(group) },
-                                    onPhotoTap: { photoIndex in
-                                        viewerRequest = DuplicateViewerRequest(groupID: group.id, startIndex: photoIndex)
-                                    },
-                                    onPromoteBest: { assetID in
-                                        promoteAsset(assetID, in: group.id)
-                                    }
-                                )
+                                SwipeCancelMergeGroupCard(onCancel: { cancelGroup(group.id) }) {
+                                    DuplicateGroupCard(
+                                        group: group,
+                                        isMerging: mergingGroupIDs.contains(group.id),
+                                        onMerge: { merge(group) },
+                                        onPhotoTap: { photoIndex in
+                                            viewerRequest = DuplicateViewerRequest(groupID: group.id, startIndex: photoIndex)
+                                        },
+                                        onPromoteBest: { assetID in
+                                            promoteAsset(assetID, in: group.id)
+                                        }
+                                    )
+                                }
                             }
                         }
                         .padding()
@@ -88,6 +91,23 @@ struct DuplicatesView: View {
                 if groups.isEmpty { done = true }
             }
         }
+    }
+
+    private func cancelGroup(_ groupID: UUID) {
+        guard let gIdx = groups.firstIndex(where: { $0.id == groupID }) else { return }
+        let removedGroup = groups.remove(at: gIdx)
+
+        for asset in removedGroup.assets where !asset.asset.isFavorite {
+            if !vm.behaviorAssets.contains(where: { $0.id == asset.id }) {
+                var behaviorItem = asset
+                behaviorItem.isSelected = false
+                vm.behaviorAssets.append(behaviorItem)
+            }
+        }
+        vm.behaviorAssets.sort { $0.creationDate < $1.creationDate }
+        vm.duplicateGroups = groups.filter { $0.groupType == .duplicate }
+        vm.similarGroups = groups.filter { $0.groupType == .similar }
+        if groups.isEmpty { done = true }
     }
 
     private func promoteAsset(_ assetID: String, in groupID: UUID) {
@@ -209,6 +229,82 @@ private struct DuplicateViewerRequest: Identifiable {
     let id = UUID()
     let groupID: UUID
     let startIndex: Int
+}
+
+private struct SwipeCancelMergeGroupCard<Content: View>: View {
+    private let actionWidth: CGFloat = 108
+    private let autoTriggerThreshold: CGFloat = 72
+
+    let onCancel: () -> Void
+    @ViewBuilder let content: () -> Content
+
+    @State private var offsetX: CGFloat = 0
+    @State private var isOpen = false
+    @State private var isHorizontalDrag: Bool? = nil
+
+    var body: some View {
+        ZStack(alignment: .trailing) {
+            RoundedRectangle(cornerRadius: 8)
+                .fill(AppColors.red.opacity(0.22))
+                .overlay(
+                    Text("取消合并")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(AppColors.red)
+                        .padding(.trailing, 12),
+                    alignment: .trailing
+                )
+
+            content()
+                .offset(x: offsetX)
+                .animation(.interactiveSpring(response: 0.24, dampingFraction: 0.9), value: offsetX)
+        }
+        .contentShape(Rectangle())
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 20, coordinateSpace: .local)
+                .onChanged { value in
+                    // Lock direction on first detection to avoid fighting with ScrollView
+                    if isHorizontalDrag == nil {
+                        isHorizontalDrag = abs(value.translation.width) > abs(value.translation.height)
+                    }
+                    guard isHorizontalDrag == true else { return }
+                    if value.translation.width < 0 {
+                        offsetX = max(-actionWidth, value.translation.width)
+                    } else if isOpen {
+                        offsetX = min(0, -actionWidth + value.translation.width)
+                    }
+                }
+                .onEnded { value in
+                    defer { isHorizontalDrag = nil }
+                    guard isHorizontalDrag == true else { return }
+                    if value.translation.width <= -autoTriggerThreshold {
+                        withAnimation(.easeOut(duration: 0.12)) { offsetX = -actionWidth }
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
+                            onCancel()
+                            offsetX = 0
+                            isOpen = false
+                        }
+                    } else if value.translation.width <= -actionWidth * 0.4 {
+                        offsetX = -actionWidth
+                        isOpen = true
+                    } else {
+                        offsetX = 0
+                        isOpen = false
+                    }
+                }
+        )
+        .overlay(alignment: .trailing) {
+            if isOpen {
+                Button("取消合并") {
+                    onCancel()
+                    offsetX = 0
+                    isOpen = false
+                }
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundColor(AppColors.red)
+                .frame(width: actionWidth, height: 48)
+            }
+        }
+    }
 }
 
 private struct BestDropDelegate: DropDelegate {

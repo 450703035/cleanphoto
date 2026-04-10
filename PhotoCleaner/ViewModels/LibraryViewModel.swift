@@ -45,6 +45,16 @@ class LibraryViewModel: ObservableObject {
     private var cancellables = Set<AnyCancellable>()
 
     init() {
+        // Fast-path: if scan/home already populated PhotoStore, render timeline immediately.
+        if !store.allAssets.isEmpty {
+            let snapshot = store.allAssets
+            allAssets = snapshot
+            let groups = Self.computeYearGroups(snapshot)
+            let map = Self.computeDayMap(snapshot)
+            yearGroups = groups
+            dayMap = map
+        }
+
         // Prune timeline data whenever any tab deletes assets through PhotoStore.
         store.$lastDeletedIds
             .dropFirst()
@@ -67,11 +77,19 @@ class LibraryViewModel: ObservableObject {
     }
 
     func load() async {
-        guard !isLoading, allAssets.isEmpty else { return }
+        guard !isLoading else { return }
         isLoading = true
 
         // Phase 1: Fetch asset metadata and apply any cached scores immediately
         let raw = await service.fetchAllAssets()
+        if raw.isEmpty {
+            allAssets = []
+            yearGroups = [:]
+            dayMap = [:]
+            scoringProgress = 1.0
+            isLoading = false
+            return
+        }
         let ids = raw.map { $0.id }
         let cached = await DatabaseService.shared.loadScores(for: ids)
 
