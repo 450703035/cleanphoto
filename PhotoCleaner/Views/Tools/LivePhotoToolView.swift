@@ -188,7 +188,7 @@ private struct LivePhotoGridCell: View {
                             .font(.system(size: 9))
                             .foregroundColor(.white.opacity(0.7))
                     }
-                    Text("省 \(savedStr)")
+                    Text(L10n.estimatedSave(savedStr))
                         .font(.system(size: 9, weight: .bold))
                         .foregroundColor(AppColors.amber)
                 }

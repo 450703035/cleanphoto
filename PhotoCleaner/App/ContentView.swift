@@ -17,6 +17,7 @@ struct ContentView: View {
                 .tag(0)
 
             TimelineView()
+                .environmentObject(scanVM)
                 .environmentObject(libraryVM)
                 .tabItem {
                     Label(L10n.tabTimeline, systemImage: "calendar")
@@ -39,6 +40,12 @@ struct ContentView: View {
         }
         .tint(AppColors.purple)
         .id(appLanguage)
-        .task { await scanVM.loadCachedResultsIfAvailable() }
+        .task {
+            await scanVM.requestAuthorizationOnAppLaunchIfNeeded()
+            await scanVM.loadCachedResultsIfAvailable()
+            Task(priority: .utility) {
+                await libraryVM.prewarmForFirstTimelineEntry()
+            }
+        }
     }
 }

@@ -28,10 +28,6 @@ final class DatabaseService: @unchecked Sendable {
         let path = dir.appendingPathComponent("photocleaner.sqlite").path
         guard sqlite3_open(path, &db) == SQLITE_OK else { return }
         sqlite3_exec(db, "PRAGMA journal_mode=WAL", nil, nil, nil)
-        // Migration: add has_faces column to existing installs (ignored if already present)
-        sqlite3_exec(db, "ALTER TABLE photo_scores ADD COLUMN has_faces INTEGER NOT NULL DEFAULT 0", nil, nil, nil)
-        // Migration: persist real file size to avoid fallback estimates on next launch
-        sqlite3_exec(db, "ALTER TABLE photo_scores ADD COLUMN file_size_bytes INTEGER", nil, nil, nil)
         sqlite3_exec(db, """
             CREATE TABLE IF NOT EXISTS photo_scores (
                 local_id         TEXT PRIMARY KEY,
@@ -76,6 +72,14 @@ final class DatabaseService: @unchecked Sendable {
             );
             CREATE INDEX IF NOT EXISTS idx_asset_scan_deleted ON asset_scan_state(is_deleted);
         """, nil, nil, nil)
+
+        // Safe migrations: only add missing columns (prevents duplicate-column errors on relaunch).
+        if !columnExists(table: "photo_scores", column: "has_faces") {
+            sqlite3_exec(db, "ALTER TABLE photo_scores ADD COLUMN has_faces INTEGER NOT NULL DEFAULT 0", nil, nil, nil)
+        }
+        if !columnExists(table: "photo_scores", column: "file_size_bytes") {
+            sqlite3_exec(db, "ALTER TABLE photo_scores ADD COLUMN file_size_bytes INTEGER", nil, nil, nil)
+        }
     }
 
     // MARK: - Queue helper
@@ -86,6 +90,18 @@ final class DatabaseService: @unchecked Sendable {
         await withCheckedContinuation { cont in
             queue.async { cont.resume(returning: work()) }
         }
+    }
+
+    private func columnExists(table: String, column: String) -> Bool {
+        var stmt: OpaquePointer?
+        let sql = "PRAGMA table_info(\(table));"
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return false }
+        defer { sqlite3_finalize(stmt) }
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            guard let cName = sqlite3_column_text(stmt, 1) else { continue }
+            if String(cString: cName) == column { return true }
+        }
+        return false
     }
 
     // MARK: - Photo Scores
@@ -160,9 +176,14 @@ final class DatabaseService: @unchecked Sendable {
                 (local_id, score, is_blurry, is_over_exposed, is_under_exposed, has_faces, file_size_bytes, scored_at)
             VALUES (?,?,?,?,?,?,?,?)
         """
-        exec("BEGIN")
-        var stmt: OpaquePointer?
-        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
+        _ = withTransaction("saveScores") {
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+                logSQLiteError("prepare saveScores")
+                return false
+            }
+            defer { sqlite3_finalize(stmt) }
+
             let now = Int64(Date().timeIntervalSince1970)
             for e in entries {
                 sqlite3_bind_text(stmt,  1, e.localId,         -1, SQLITE_TRANSIENT)
@@ -177,12 +198,15 @@ final class DatabaseService: @unchecked Sendable {
                     sqlite3_bind_null(stmt, 7)
                 }
                 sqlite3_bind_int64(stmt, 8, now)
-                sqlite3_step(stmt)
+                guard sqlite3_step(stmt) == SQLITE_DONE else {
+                    logSQLiteError("step saveScores")
+                    return false
+                }
                 sqlite3_reset(stmt)
+                sqlite3_clear_bindings(stmt)
             }
-            sqlite3_finalize(stmt)
+            return true
         }
-        exec("COMMIT")
     }
 
     struct FileSizeEntry: Sendable {
@@ -197,18 +221,26 @@ final class DatabaseService: @unchecked Sendable {
     private func _saveFileSizes(_ entries: [FileSizeEntry]) {
         guard !entries.isEmpty else { return }
         let sql = "UPDATE photo_scores SET file_size_bytes=? WHERE local_id=?"
-        exec("BEGIN")
-        var stmt: OpaquePointer?
-        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
+        _ = withTransaction("saveFileSizes") {
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+                logSQLiteError("prepare saveFileSizes")
+                return false
+            }
+            defer { sqlite3_finalize(stmt) }
+
             for e in entries {
                 sqlite3_bind_int64(stmt, 1, e.fileSizeBytes)
                 sqlite3_bind_text(stmt,  2, e.localId, -1, SQLITE_TRANSIENT)
-                sqlite3_step(stmt)
+                guard sqlite3_step(stmt) == SQLITE_DONE else {
+                    logSQLiteError("step saveFileSizes")
+                    return false
+                }
                 sqlite3_reset(stmt)
+                sqlite3_clear_bindings(stmt)
             }
-            sqlite3_finalize(stmt)
+            return true
         }
-        exec("COMMIT")
     }
 
     func removeScores(for ids: [String]) async {
@@ -217,17 +249,26 @@ final class DatabaseService: @unchecked Sendable {
 
     private func _removeScores(for ids: [String]) {
         guard !ids.isEmpty else { return }
-        exec("BEGIN")
-        var stmt: OpaquePointer?
-        if sqlite3_prepare_v2(db, "DELETE FROM photo_scores WHERE local_id=?", -1, &stmt, nil) == SQLITE_OK {
+        _ = withTransaction("removeScores") {
+            var stmt: OpaquePointer?
+            let sql = "DELETE FROM photo_scores WHERE local_id=?"
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+                logSQLiteError("prepare removeScores")
+                return false
+            }
+            defer { sqlite3_finalize(stmt) }
+
             for id in ids {
                 sqlite3_bind_text(stmt, 1, id, -1, SQLITE_TRANSIENT)
-                sqlite3_step(stmt)
+                guard sqlite3_step(stmt) == SQLITE_DONE else {
+                    logSQLiteError("step removeScores")
+                    return false
+                }
                 sqlite3_reset(stmt)
+                sqlite3_clear_bindings(stmt)
             }
-            sqlite3_finalize(stmt)
+            return true
         }
-        exec("COMMIT")
     }
 
     // MARK: - Photo Groups (duplicate / similar)
@@ -237,27 +278,47 @@ final class DatabaseService: @unchecked Sendable {
     }
 
     private func _saveGroups(_ groups: [PhotoGroup]) {
-        exec("DELETE FROM photo_groups")
-        guard !groups.isEmpty else { return }
-        let sql = "INSERT OR IGNORE INTO photo_groups (group_id,local_id,group_type,rank) VALUES (?,?,?,?)"
-        exec("BEGIN")
-        var stmt: OpaquePointer?
-        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
-            for g in groups {
-                let gid   = g.id.uuidString
-                let gtype = g.groupType == .duplicate ? "duplicate" : "similar"
-                for (rank, asset) in g.assets.enumerated() {
-                    sqlite3_bind_text(stmt, 1, gid,      -1, SQLITE_TRANSIENT)
-                    sqlite3_bind_text(stmt, 2, asset.id, -1, SQLITE_TRANSIENT)
-                    sqlite3_bind_text(stmt, 3, gtype,    -1, SQLITE_TRANSIENT)
-                    sqlite3_bind_int(stmt,  4, Int32(rank))
-                    sqlite3_step(stmt)
-                    sqlite3_reset(stmt)
-                }
+        guard exec("BEGIN") == SQLITE_OK else { return }
+        var shouldCommit = false
+        defer {
+            if shouldCommit {
+                _ = exec("COMMIT")
+            } else {
+                _ = exec("ROLLBACK")
             }
-            sqlite3_finalize(stmt)
         }
-        exec("COMMIT")
+
+        guard exec("DELETE FROM photo_groups") == SQLITE_OK else { return }
+        guard !groups.isEmpty else {
+            shouldCommit = true
+            return
+        }
+
+        let sql = "INSERT OR IGNORE INTO photo_groups (group_id,local_id,group_type,rank) VALUES (?,?,?,?)"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            logSQLiteError("prepare saveGroups insert")
+            return
+        }
+        defer { sqlite3_finalize(stmt) }
+
+        for g in groups {
+            let gid   = g.id.uuidString
+            let gtype = g.groupType == .duplicate ? "duplicate" : "similar"
+            for (rank, asset) in g.assets.enumerated() {
+                sqlite3_bind_text(stmt, 1, gid,      -1, SQLITE_TRANSIENT)
+                sqlite3_bind_text(stmt, 2, asset.id, -1, SQLITE_TRANSIENT)
+                sqlite3_bind_text(stmt, 3, gtype,    -1, SQLITE_TRANSIENT)
+                sqlite3_bind_int(stmt,  4, Int32(rank))
+                guard sqlite3_step(stmt) == SQLITE_DONE else {
+                    logSQLiteError("step saveGroups insert")
+                    return
+                }
+                sqlite3_reset(stmt)
+                sqlite3_clear_bindings(stmt)
+            }
+        }
+        shouldCommit = true
     }
 
     struct GroupRow {
@@ -312,16 +373,21 @@ final class DatabaseService: @unchecked Sendable {
             VALUES (?,?,?,?,?,?,?)
         """
         var stmt: OpaquePointer?
-        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
-            sqlite3_bind_int64(stmt, 1, Int64(Date().timeIntervalSince1970))
-            sqlite3_bind_int(stmt,   2, Int32(summary.totalCount))
-            sqlite3_bind_int(stmt,   3, Int32(duplicateCount))
-            sqlite3_bind_int(stmt,   4, Int32(similarCount))
-            sqlite3_bind_int(stmt,   5, Int32(lowQualityCount))
-            sqlite3_bind_int64(stmt, 6, summary.freeableBytes)
-            sqlite3_bind_int(stmt,   7, Int32(summary.healthScore))
-            sqlite3_step(stmt)
-            sqlite3_finalize(stmt)
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            logSQLiteError("prepare saveScanRecord")
+            return
+        }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_int64(stmt, 1, Int64(Date().timeIntervalSince1970))
+        sqlite3_bind_int(stmt,   2, Int32(summary.totalCount))
+        sqlite3_bind_int(stmt,   3, Int32(duplicateCount))
+        sqlite3_bind_int(stmt,   4, Int32(similarCount))
+        sqlite3_bind_int(stmt,   5, Int32(lowQualityCount))
+        sqlite3_bind_int64(stmt, 6, summary.freeableBytes)
+        sqlite3_bind_int(stmt,   7, Int32(summary.healthScore))
+        guard sqlite3_step(stmt) == SQLITE_DONE else {
+            logSQLiteError("step saveScanRecord")
+            return
         }
     }
 
@@ -359,20 +425,28 @@ final class DatabaseService: @unchecked Sendable {
     private func _saveDeleteRecords(_ assets: [PhotoAsset]) {
         guard !assets.isEmpty else { return }
         let sql = "INSERT INTO delete_records (local_id,deleted_at,size_bytes) VALUES (?,?,?)"
-        exec("BEGIN")
-        var stmt: OpaquePointer?
-        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
+        _ = withTransaction("saveDeleteRecords") {
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+                logSQLiteError("prepare saveDeleteRecords")
+                return false
+            }
+            defer { sqlite3_finalize(stmt) }
+
             let now = Int64(Date().timeIntervalSince1970)
             for a in assets {
                 sqlite3_bind_text(stmt,  1, a.id,        -1, SQLITE_TRANSIENT)
                 sqlite3_bind_int64(stmt, 2, now)
                 sqlite3_bind_int64(stmt, 3, a.sizeBytes)
-                sqlite3_step(stmt)
+                guard sqlite3_step(stmt) == SQLITE_DONE else {
+                    logSQLiteError("step saveDeleteRecords")
+                    return false
+                }
                 sqlite3_reset(stmt)
+                sqlite3_clear_bindings(stmt)
             }
-            sqlite3_finalize(stmt)
+            return true
         }
-        exec("COMMIT")
     }
 
     // MARK: - Asset Scan State
@@ -423,20 +497,28 @@ final class DatabaseService: @unchecked Sendable {
                 is_deleted = 0,
                 deleted_at = NULL
         """
-        exec("BEGIN")
-        var stmt: OpaquePointer?
-        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
+        _ = withTransaction("markAssetsScanned") {
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+                logSQLiteError("prepare markAssetsScanned")
+                return false
+            }
+            defer { sqlite3_finalize(stmt) }
+
             let now = Int64(Date().timeIntervalSince1970)
             for id in ids {
                 sqlite3_bind_text(stmt, 1, id, -1, SQLITE_TRANSIENT)
                 sqlite3_bind_int64(stmt, 2, now)
                 sqlite3_bind_int64(stmt, 3, now)
-                sqlite3_step(stmt)
+                guard sqlite3_step(stmt) == SQLITE_DONE else {
+                    logSQLiteError("step markAssetsScanned")
+                    return false
+                }
                 sqlite3_reset(stmt)
+                sqlite3_clear_bindings(stmt)
             }
-            sqlite3_finalize(stmt)
+            return true
         }
-        exec("COMMIT")
     }
 
     func markAssetsDeleted(_ ids: [String]) async {
@@ -452,21 +534,29 @@ final class DatabaseService: @unchecked Sendable {
                 is_deleted = 1,
                 deleted_at = excluded.deleted_at
         """
-        exec("BEGIN")
-        var stmt: OpaquePointer?
-        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
+        _ = withTransaction("markAssetsDeleted") {
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+                logSQLiteError("prepare markAssetsDeleted")
+                return false
+            }
+            defer { sqlite3_finalize(stmt) }
+
             let now = Int64(Date().timeIntervalSince1970)
             for id in ids {
                 sqlite3_bind_text(stmt, 1, id, -1, SQLITE_TRANSIENT)
                 sqlite3_bind_int64(stmt, 2, now)
                 sqlite3_bind_int64(stmt, 3, now)
                 sqlite3_bind_int64(stmt, 4, now)
-                sqlite3_step(stmt)
+                guard sqlite3_step(stmt) == SQLITE_DONE else {
+                    logSQLiteError("step markAssetsDeleted")
+                    return false
+                }
                 sqlite3_reset(stmt)
+                sqlite3_clear_bindings(stmt)
             }
-            sqlite3_finalize(stmt)
+            return true
         }
-        exec("COMMIT")
     }
 
     // MARK: - Cleaning stats (Settings page)
@@ -542,7 +632,38 @@ final class DatabaseService: @unchecked Sendable {
 
     // MARK: - Helpers
 
-    private func exec(_ sql: String) {
-        sqlite3_exec(db, sql, nil, nil, nil)
+    @discardableResult
+    private func withTransaction(_ context: String, _ work: () -> Bool) -> Bool {
+        guard exec("BEGIN") == SQLITE_OK else { return false }
+        let ok = work()
+        _ = exec(ok ? "COMMIT" : "ROLLBACK")
+        if !ok {
+            print("[DatabaseService] transaction rolled back: \(context)")
+        }
+        return ok
+    }
+
+    private func logSQLiteError(_ context: String) {
+        guard let db else {
+            print("[DatabaseService] \(context) failed: database is nil")
+            return
+        }
+        let code = sqlite3_errcode(db)
+        let message = String(cString: sqlite3_errmsg(db))
+        print("[DatabaseService] \(context) failed (\(code)): \(message)")
+    }
+
+    @discardableResult
+    private func exec(_ sql: String) -> Int32 {
+        guard let db else {
+            print("[DatabaseService] exec failed: database is nil")
+            return SQLITE_MISUSE
+        }
+        let rc = sqlite3_exec(db, sql, nil, nil, nil)
+        if rc != SQLITE_OK {
+            let snippet = sql.replacingOccurrences(of: "\n", with: " ").prefix(80)
+            logSQLiteError("exec \(snippet)")
+        }
+        return rc
     }
 }

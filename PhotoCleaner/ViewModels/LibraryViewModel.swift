@@ -11,29 +11,46 @@ class LibraryViewModel: ObservableObject {
     @Published var scoringProgress: Double = 0   // 0.0 – 1.0
     /// User's manual selection overrides: assetId -> isSelected (persists within session)
     var selectionOverrides: [String: Bool] = [:]
+    private var yearSizeCache: [Int: Int64] = [:]
+    private var monthSizeCache: [String: Int64] = [:] // key: "year|month"
+    private var yearSelectedSizeCache: [Int: Int64] = [:]
+    private var monthSelectedSizeCache: [String: Int64] = [:] // key: "year|month"
 
     // MARK: - Size helpers (derived from yearGroups / dayMap)
 
     func yearSize(_ year: Int) -> Int64 {
-        yearGroups[year]?.values.flatMap { $0 }.reduce(0) { $0 + $1.totalSize } ?? 0
+        yearSizeCache[year] ?? 0
     }
 
     func monthSize(year: Int, month: String) -> Int64 {
-        yearGroups[year]?[month]?.reduce(0) { $0 + $1.totalSize } ?? 0
+        monthSizeCache["\(year)|\(month)"] ?? 0
     }
 
     func yearSelectedSize(_ year: Int) -> Int64 {
-        yearGroups[year]?.values.flatMap { $0 }.flatMap { $0.assets }.reduce(0) { total, asset in
-            let selected = selectionOverrides[asset.id] ?? asset.isSelected
-            return total + (selected ? asset.sizeBytes : 0)
-        } ?? 0
+        if selectionOverrides.isEmpty {
+            return yearSelectedSizeCache[year] ?? 0
+        }
+        guard let monthMap = yearGroups[year] else { return 0 }
+        return monthMap.values
+            .flatMap { $0 }
+            .flatMap { $0.assets }
+            .reduce(0) { total, asset in
+                let selected = selectionOverrides[asset.id] ?? asset.isSelected
+                return total + (selected ? asset.sizeBytes : 0)
+            }
     }
 
     func monthSelectedSize(year: Int, month: String) -> Int64 {
-        yearGroups[year]?[month]?.flatMap { $0.assets }.reduce(0) { total, asset in
-            let selected = selectionOverrides[asset.id] ?? asset.isSelected
-            return total + (selected ? asset.sizeBytes : 0)
-        } ?? 0
+        if selectionOverrides.isEmpty {
+            return monthSelectedSizeCache["\(year)|\(month)"] ?? 0
+        }
+        guard let folders = yearGroups[year]?[month] else { return 0 }
+        return folders
+            .flatMap { $0.assets }
+            .reduce(0) { total, asset in
+                let selected = selectionOverrides[asset.id] ?? asset.isSelected
+                return total + (selected ? asset.sizeBytes : 0)
+            }
     }
 
     var maxDaySize: Int64 {
@@ -43,16 +60,25 @@ class LibraryViewModel: ObservableObject {
     private let service = PhotoLibraryService.shared
     private let store   = PhotoStore.shared
     private var cancellables = Set<AnyCancellable>()
+    private var lastLoadTime: Date?
+    private let minAutoReloadInterval: TimeInterval = 30
+    private var scoringTask: Task<Void, Never>?
+    private var timelineInteractionActive = false
+    private var scoringConcurrencyLimit: Int { timelineInteractionActive ? 2 : 4 }
 
     init() {
         // Fast-path: if scan/home already populated PhotoStore, render timeline immediately.
         if !store.allAssets.isEmpty {
             let snapshot = store.allAssets
             allAssets = snapshot
-            let groups = Self.computeYearGroups(snapshot)
-            let map = Self.computeDayMap(snapshot)
-            yearGroups = groups
-            dayMap = map
+            Task { @MainActor in
+                let (groups, map) = await Task.detached(priority: .userInitiated) {
+                    (LibraryViewModel.computeYearGroups(snapshot), LibraryViewModel.computeDayMap(snapshot))
+                }.value
+                self.yearGroups = groups
+                self.dayMap = map
+                self.rebuildSizeCaches()
+            }
         }
 
         // Prune timeline data whenever any tab deletes assets through PhotoStore.
@@ -69,16 +95,49 @@ class LibraryViewModel: ObservableObject {
     /// Pull-to-refresh: wipe cached scores and re-run scoring from scratch.
     func rescore() async {
         guard !isLoading else { return }
+        scoringTask?.cancel()
         let ids = allAssets.map { $0.id }
         await DatabaseService.shared.removeScores(for: ids)
         allAssets = []          // clears the guard in load()
+        yearGroups = [:]
+        dayMap = [:]
+        rebuildSizeCaches()
         scoringProgress = 0
+        await load(force: true)
+    }
+
+    /// Warm timeline data in background right after app launch/authorization,
+    /// so first entry to Timeline feels instant.
+    func prewarmForFirstTimelineEntry() async {
+        guard allAssets.isEmpty, !isLoading else { return }
         await load()
     }
 
-    func load() async {
+    func setTimelineInteractionActive(_ active: Bool) {
+        timelineInteractionActive = active
+    }
+
+    func load(force: Bool = false) async {
         guard !isLoading else { return }
+        if !force {
+            // Avoid full reload while previous scoring is still running.
+            if !allAssets.isEmpty && scoringProgress < 1.0 { return }
+            // Avoid repeated reloads when users switch tabs frequently.
+            if !allAssets.isEmpty,
+               let lastLoadTime,
+               Date().timeIntervalSince(lastLoadTime) < minAutoReloadInterval {
+                return
+            }
+        }
         isLoading = true
+        scoringTask?.cancel()
+
+        let auth = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+        guard auth == .authorized || auth == .limited else {
+            scoringProgress = 1.0
+            isLoading = false
+            return
+        }
 
         // Phase 1: Fetch asset metadata and apply any cached scores immediately
         let raw = await service.fetchAllAssets()
@@ -86,6 +145,7 @@ class LibraryViewModel: ObservableObject {
             allAssets = []
             yearGroups = [:]
             dayMap = [:]
+            rebuildSizeCaches()
             scoringProgress = 1.0
             isLoading = false
             return
@@ -93,7 +153,7 @@ class LibraryViewModel: ObservableObject {
         let ids = raw.map { $0.id }
         let cached = await DatabaseService.shared.loadScores(for: ids)
 
-        var assets = raw.map { a -> PhotoAsset in
+        let assets = raw.map { a -> PhotoAsset in
             var a = a
             if let c = cached[a.id] {
                 a.score = c.score
@@ -103,15 +163,19 @@ class LibraryViewModel: ObservableObject {
             return a
         }
 
+        // Publish assets immediately so the UI can render placeholders while grouping.
+        allAssets = assets
+
         // Build initial groups off main thread
         let (initialGroups, initialDayMap) = await Task.detached(priority: .userInitiated) {
             (LibraryViewModel.computeYearGroups(assets), LibraryViewModel.computeDayMap(assets))
         }.value
 
-        allAssets = assets
         yearGroups = initialGroups
         dayMap = initialDayMap
+        rebuildSizeCaches()
         isLoading = false
+        lastLoadTime = Date()
 
         // Phase 2: Score only assets not yet in the cache
         let uncached = (0..<raw.count).filter { cached[raw[$0].id] == nil }
@@ -127,76 +191,48 @@ class LibraryViewModel: ObservableObject {
             return
         }
 
-        var nextPos = 0
-        var newEntries: [DatabaseService.ScoreEntry] = []
-        var doneCount = cachedCount
-        // Throttle: only publish progress every N photos to avoid flooding main thread
-        let progressStride = max(1, totalCount / 30)
+        let rawSnapshot = raw
+        let uncachedSnapshot = uncached
+        let assetsSnapshot = assets
+        let idsSnapshot = ids
+        let maxConcurrent = self.scoringConcurrencyLimit
+        scoringTask = Task(priority: .utility) { [weak self] in
+            guard let self else { return }
+            let scored = await Task.detached(priority: .utility) {
+                await LibraryViewModel.scoreUncachedAssets(
+                    raw: rawSnapshot,
+                    uncachedIndices: uncachedSnapshot,
+                    seedAssets: assetsSnapshot,
+                    maxConcurrent: maxConcurrent
+                )
+            }.value
+            guard !Task.isCancelled else { return }
 
-        await withTaskGroup(of: (Int, PhotoLibraryService.ScoreResult).self) { group in
-            while nextPos < min(10, uncached.count) {
-                let i = uncached[nextPos]
-                let asset = raw[i].asset
-                group.addTask {
-                    let r = await PhotoLibraryService.shared.score(asset: asset)
-                    return (i, r)
-                }
-                nextPos += 1
-            }
+            let (finalGroups, finalDayMap) = await Task.detached(priority: .userInitiated) {
+                (LibraryViewModel.computeYearGroups(scored.assets), LibraryViewModel.computeDayMap(scored.assets))
+            }.value
+            guard !Task.isCancelled else { return }
 
-            for await (idx, result) in group {
-                if Task.isCancelled { return }
-                assets[idx].score = result.score
-                assets[idx].isSelected = Self.shouldAutoSelect(score: result.score, hasFaces: result.hasFaces)
-                newEntries.append(DatabaseService.ScoreEntry(
-                    localId:        raw[idx].id,
-                    score:          result.score,
-                    isBlurry:       result.isBlurry,
-                    isOverExposed:  result.isOverExposed,
-                    isUnderExposed: result.isUnderExposed,
-                    hasFaces:       result.hasFaces,
-                    fileSizeBytes:  assets[idx].fileSizeBytes
-                ))
-                doneCount += 1
-                // Throttle progress updates to reduce main-thread re-renders
-                if doneCount % progressStride == 0 || nextPos >= uncached.count {
-                    scoringProgress = Double(doneCount) / Double(max(totalCount, 1))
-                }
+            await DatabaseService.shared.saveScores(scored.entries)
+            guard !Task.isCancelled else { return }
+            await DatabaseService.shared.pruneStaleScores(keepIds: Set(idsSnapshot))
+            guard !Task.isCancelled else { return }
 
-                if nextPos < uncached.count {
-                    let i = uncached[nextPos]
-                    let asset = raw[i].asset
-                    group.addTask {
-                        let r = await PhotoLibraryService.shared.score(asset: asset)
-                        return (i, r)
-                    }
-                    nextPos += 1
-                }
-            }
-        }
-
-        // Final rebuild off main thread
-        let (finalGroups, finalDayMap) = await Task.detached(priority: .userInitiated) {
-            (LibraryViewModel.computeYearGroups(assets), LibraryViewModel.computeDayMap(assets))
-        }.value
-
-        store.setAssets(assets)
-        allAssets = assets
-        yearGroups = finalGroups
-        dayMap = finalDayMap
-
-        await DatabaseService.shared.saveScores(newEntries)
-        scoringProgress = 1.0
-        Task.detached(priority: .background) {
-            await DatabaseService.shared.pruneStaleScores(keepIds: Set(ids))
+            self.store.setAssets(scored.assets)
+            self.allAssets = scored.assets
+            self.yearGroups = finalGroups
+            self.dayMap = finalDayMap
+            self.rebuildSizeCaches()
+            self.scoringProgress = 1.0
         }
     }
 
     // MARK: - Group into year -> month -> album folders (runs off main thread)
     nonisolated static func computeYearGroups(_ assets: [PhotoAsset]) -> [Int: [String: [AlbumFolder]]] {
         let cal = Calendar.current
-        let monthNames = ["1月","2月","3月","4月","5月","6月","7月","8月","9月","10月","11月","12月"]
-        let df = DateFormatter(); df.dateFormat = "M月d日"
+        let df = DateFormatter()
+        df.locale = Locale(identifier: L10n.dateLocaleIdentifier)
+        df.setLocalizedDateFormatFromTemplate("Md")
         let sorted = assets.sorted { $0.creationDate > $1.creationDate }
 
         var byDay: [String: [PhotoAsset]] = [:]
@@ -211,7 +247,7 @@ class LibraryViewModel: ObservableObject {
             let parts = key.split(separator: "-").compactMap { Int($0) }
             guard parts.count == 3 else { continue }
             let (y, m, _) = (parts[0], parts[1], parts[2])
-            let monthLabel = m >= 1 && m <= 12 ? monthNames[m-1] : "\(m)月"
+            let monthLabel = L10n.monthLabel(m)
             let title = df.string(from: dayAssets.first!.creationDate)
             let folder = AlbumFolder(
                 title: title,
@@ -245,6 +281,65 @@ class LibraryViewModel: ObservableObject {
         return map
     }
 
+    private struct ScoringBatchResult {
+        var assets: [PhotoAsset]
+        var entries: [DatabaseService.ScoreEntry]
+    }
+
+    nonisolated private static func scoreUncachedAssets(
+        raw: [PhotoAsset],
+        uncachedIndices: [Int],
+        seedAssets: [PhotoAsset],
+        maxConcurrent: Int
+    ) async -> ScoringBatchResult {
+        guard !uncachedIndices.isEmpty else {
+            return ScoringBatchResult(assets: seedAssets, entries: [])
+        }
+
+        var assets = seedAssets
+        var entries: [DatabaseService.ScoreEntry] = []
+        var nextPos = 0
+        var inFlight = 0
+        let workerLimit = max(1, maxConcurrent)
+
+        await withTaskGroup(of: (Int, PhotoLibraryService.ScoreResult).self) { group in
+            func enqueue() {
+                while inFlight < workerLimit && nextPos < uncachedIndices.count {
+                    let i = uncachedIndices[nextPos]
+                    let asset = raw[i].asset
+                    group.addTask {
+                        let r = await PhotoLibraryService.shared.score(asset: asset)
+                        return (i, r)
+                    }
+                    inFlight += 1
+                    nextPos += 1
+                }
+            }
+
+            enqueue()
+            while let (idx, result) = await group.next() {
+                inFlight = max(0, inFlight - 1)
+                if Task.isCancelled { return }
+                assets[idx].score = result.score
+                assets[idx].isSelected = LibraryViewModel.shouldAutoSelect(
+                    score: result.score,
+                    hasFaces: result.hasFaces
+                )
+                entries.append(DatabaseService.ScoreEntry(
+                    localId:        raw[idx].id,
+                    score:          result.score,
+                    isBlurry:       result.isBlurry,
+                    isOverExposed:  result.isOverExposed,
+                    isUnderExposed: result.isUnderExposed,
+                    hasFaces:       result.hasFaces,
+                    fileSizeBytes:  assets[idx].fileSizeBytes
+                ))
+                enqueue()
+            }
+        }
+        return ScoringBatchResult(assets: assets, entries: entries)
+    }
+
     /// Called by the PhotoStore subscription when any tab deletes assets.
     /// Uses `store.allAssets` as the source of truth (already pruned) and rebuilds the timeline views.
     private func syncDeletion(ids: Set<String>) async {
@@ -257,14 +352,39 @@ class LibraryViewModel: ObservableObject {
         }.value
         yearGroups = newGroups
         dayMap = newDayMap
+        rebuildSizeCaches()
     }
 
-    var sortedYears: [Int] { yearGroups.keys.sorted(by: >) }
+    @Published private(set) var sortedYears: [Int] = []
+    @Published private(set) var monthsPerYear: [Int: [String]] = [:]
+    private static let zhMonthNames = ["1月","2月","3月","4月","5月","6月","7月","8月","9月","10月","11月","12月"]
+    private static let enMonthNames = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
 
     func months(for year: Int) -> [String] {
-        let order = ["12月","11月","10月","9月","8月","7月","6月","5月","4月","3月","2月","1月"]
-        let available: Set<String> = yearGroups[year].map { Set($0.keys) } ?? []
-        return order.filter { available.contains($0) }
+        monthsPerYear[year] ?? []
+    }
+
+    private func rebuildYearMonthIndex() {
+        let newYears = yearGroups.keys.sorted(by: >)
+        var newMonths: [Int: [String]] = [:]
+        for year in newYears {
+            let available: Set<String> = yearGroups[year].map { Set($0.keys) } ?? []
+            newMonths[year] = available.sorted { lhs, rhs in
+                let l = monthSortIndex(lhs)
+                let r = monthSortIndex(rhs)
+                if l != r { return l > r }
+                return lhs > rhs
+            }
+        }
+        if newYears != sortedYears { sortedYears = newYears }
+        if newMonths != monthsPerYear { monthsPerYear = newMonths }
+    }
+
+    private func monthSortIndex(_ label: String) -> Int {
+        if let idx = L10n.monthNames.firstIndex(of: label) { return idx + 1 }
+        if let idx = Self.zhMonthNames.firstIndex(of: label) { return idx + 1 }
+        if let idx = Self.enMonthNames.firstIndex(of: label) { return idx + 1 }
+        return 0
     }
 
     func dayInfo(year: Int, month: Int, day: Int) -> DayInfo? {
@@ -275,9 +395,41 @@ class LibraryViewModel: ObservableObject {
     // Single source of truth for whether a photo should be auto-marked for deletion.
     // Reads AppConfig (backed by UserDefaults / @AppStorage) so Settings changes take
     // effect on the next load/rescore without any extra wiring.
-    static func shouldAutoSelect(score: Int, hasFaces: Bool) -> Bool {
+    nonisolated static func shouldAutoSelect(score: Int, hasFaces: Bool) -> Bool {
         guard AppConfig.autoSelect else { return false }            // user disabled auto-select
         if AppConfig.protectFaces && hasFaces { return false }      // face-protection shield
         return score < AppConfig.deleteThreshold                    // normal threshold check
+    }
+
+    private func rebuildSizeCaches() {
+        rebuildYearMonthIndex()
+        var ys: [Int: Int64] = [:]
+        var ms: [String: Int64] = [:]
+        var ysSelected: [Int: Int64] = [:]
+        var msSelected: [String: Int64] = [:]
+        for (year, monthMap) in yearGroups {
+            var yTotal: Int64 = 0
+            var ySelectedTotal: Int64 = 0
+            for (month, folders) in monthMap {
+                var total: Int64 = 0
+                var selectedTotal: Int64 = 0
+                for folder in folders {
+                    total += folder.totalSize
+                    selectedTotal += folder.assets.reduce(0) { subtotal, asset in
+                        subtotal + (asset.isSelected ? asset.sizeBytes : 0)
+                    }
+                }
+                ms["\(year)|\(month)"] = total
+                msSelected["\(year)|\(month)"] = selectedTotal
+                yTotal += total
+                ySelectedTotal += selectedTotal
+            }
+            ys[year] = yTotal
+            ysSelected[year] = ySelectedTotal
+        }
+        yearSizeCache = ys
+        monthSizeCache = ms
+        yearSelectedSizeCache = ysSelected
+        monthSelectedSizeCache = msSelected
     }
 }

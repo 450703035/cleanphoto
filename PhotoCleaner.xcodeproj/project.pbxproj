@@ -30,6 +30,7 @@
 		A021 /* SwipeDeleteToolView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F021 /* SwipeDeleteToolView.swift */; };
 		A022 /* ToolSharedSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = F022 /* ToolSharedSupport.swift */; };
 		A023 /* L10n.swift in Sources */ = {isa = PBXBuildFile; fileRef = F023 /* L10n.swift */; };
+		2011E0A28EDF4F65296BB37A /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F4316D49BC3101C62AC8D7E /* OnboardingView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -57,6 +58,7 @@
 		F022 /* ToolSharedSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolSharedSupport.swift; sourceTree = "<group>"; };
 		F023 /* L10n.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = L10n.swift; sourceTree = "<group>"; };
 		FAPP /* PhotoCleaner.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PhotoCleaner.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		7F4316D49BC3101C62AC8D7E /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -171,6 +173,7 @@
 		GRP_VIEWS /* Views */ = {
 			isa = PBXGroup;
 			children = (
+				F3FD5E561A407B156CE148F7 /* Onboarding */,
 				GRP_SHARED /* Shared */,
 				GRP_HOME /* Home */,
 				GRP_TIMELINE /* Timeline */,
@@ -187,6 +190,14 @@
 				F007 /* LibraryViewModel.swift */,
 			);
 			path = ViewModels;
+			sourceTree = "<group>";
+		};
+		F3FD5E561A407B156CE148F7 /* Onboarding */ = {
+			isa = PBXGroup;
+			children = (
+				7F4316D49BC3101C62AC8D7E /* OnboardingView.swift */,
+			);
+			path = Onboarding;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -258,6 +269,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				2011E0A28EDF4F65296BB37A /* OnboardingView.swift in Sources */,
 				A001 /* PhotoCleanerApp.swift in Sources */,
 				A002 /* ContentView.swift in Sources */,
 				A003 /* AppConstants.swift in Sources */,

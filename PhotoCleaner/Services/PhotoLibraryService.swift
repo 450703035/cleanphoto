@@ -381,27 +381,33 @@ class PhotoLibraryService: ObservableObject {
 
     // MARK: - Detect low quality
     func findLowQuality(assets: [PhotoAsset], qualityMap: [String: QualitySignals]) -> [PhotoAsset] {
-        assets.filter { $0.score < ScoringConfig.lowQualityThreshold }.map { asset in
-            var a = asset
-            a.isSelected = true
-            if let q = qualityMap[a.id] {
-                // Priority: blur is the most important signal in low-quality routing.
-                if q.isBlurry {
-                    a.reason = .blurry
-                } else if q.isShaky {
-                    a.reason = .shaky
-                } else if q.isFocusFailed {
-                    a.reason = .focusFail
-                } else if q.isOverExposed || q.isUnderExposed {
-                    a.reason = .exposure
+        assets
+            // Screenshots must stay in Screenshot Cleanup when metadata marks them as screenshot.
+            .filter {
+                $0.score < ScoringConfig.lowQualityThreshold &&
+                !$0.asset.mediaSubtypes.contains(.photoScreenshot)
+            }
+            .map { asset in
+                var a = asset
+                a.isSelected = true
+                if let q = qualityMap[a.id] {
+                    // Priority: blur is the most important signal in low-quality routing.
+                    if q.isBlurry {
+                        a.reason = .blurry
+                    } else if q.isShaky {
+                        a.reason = .shaky
+                    } else if q.isFocusFailed {
+                        a.reason = .focusFail
+                    } else if q.isOverExposed || q.isUnderExposed {
+                        a.reason = .exposure
+                    } else {
+                        a.reason = .blurry
+                    }
                 } else {
                     a.reason = .blurry
                 }
-            } else {
-                a.reason = .blurry
+                return a
             }
-            return a
-        }
     }
 
     // MARK: - Screenshot semantic classification (local Vision heuristics)

@@ -4,15 +4,9 @@ import Combine
 
 @MainActor
 class ScanViewModel: ObservableObject {
-
-    static let SCAN_PHASES = [
-        "检测重复照片", "分析相似图片", "评估照片质量",
-        "建立评分数据库", "生成清理方案"
-    ]
-
     @Published var phase: ScanPhase = .idle
     @Published var progress: Double = 0
-    @Published var phaseLabel: String = ScanViewModel.SCAN_PHASES[0]
+    @Published var phaseLabel: String = L10n.scanPhase1
     @Published var analyzedCount: Int = 0
     @Published var summary: LibrarySummary = LibrarySummary()
     @Published var authorized: Bool = false
@@ -21,6 +15,7 @@ class ScanViewModel: ObservableObject {
     @Published var isBackgroundAnalyzing: Bool = false
     @Published var backgroundProgress: Double = 0
     @Published var backgroundLabel: String = ""
+    @Published private(set) var isUserInteractingInDetail: Bool = false
 
     @Published var duplicateGroups: [PhotoGroup] = []
     @Published var similarGroups:   [PhotoGroup] = []
@@ -60,6 +55,22 @@ class ScanViewModel: ObservableObject {
             .store(in: &cancellables)
     }
 
+    // MARK: - Authorization
+
+    /// Request photo-library permission as early as app launch (Home tab),
+    /// so users won't see the system prompt when entering Timeline later.
+    func requestAuthorizationOnAppLaunchIfNeeded() async {
+        let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+        switch status {
+        case .authorized, .limited:
+            authorized = true
+        case .notDetermined:
+            authorized = await service.requestAuthorization()
+        default:
+            authorized = false
+        }
+    }
+
     // MARK: - Restore last scan from DB on app launch
 
     /// Loads the last scan results from the local database without re-scanning.
@@ -86,7 +97,7 @@ class ScanViewModel: ObservableObject {
             var a = a
             if let c = cached[a.id] {
                 a.score = c.score
-                a.isSelected = c.score < AppConfig.deleteThreshold
+                a.isSelected = LibraryViewModel.shouldAutoSelect(score: c.score, hasFaces: c.hasFaces)
                 a.fileSizeBytes = c.fileSizeBytes
             }
             return a
@@ -158,6 +169,11 @@ class ScanViewModel: ObservableObject {
         screenshots = []; videos = []; lowQuality = []; favorites = []; behaviorAssets = []; allAssets = []
     }
 
+    func setDetailInteraction(_ active: Bool) {
+        guard isUserInteractingInDetail != active else { return }
+        isUserInteractingInDetail = active
+    }
+
     // MARK: - Scan
 
     private func runScan() async {
@@ -178,7 +194,7 @@ class ScanViewModel: ObservableObject {
             }
         }
 
-        phaseLabel = "请求相册权限"
+        phaseLabel = L10n.scanRequestAuth
         authorized = await service.requestAuthorization()
         guard authorized else {
             scanClockTask?.cancel()
@@ -188,7 +204,7 @@ class ScanViewModel: ObservableObject {
         phase = .scanning
 
         // Phase A: first-pass scan (target ~1 minute before showing dashboard)
-        phaseLabel = "第一阶段：统计空间与类型"
+        phaseLabel = L10n.scanPhaseA
         let raw = await service.fetchAllAssets()
         guard !raw.isEmpty else {
             scanClockTask?.cancel()
@@ -214,7 +230,7 @@ class ScanViewModel: ObservableObject {
             var a = a
             if let c = cached[a.id] {
                 a.score = c.score
-                a.isSelected = c.score < AppConfig.deleteThreshold
+                a.isSelected = LibraryViewModel.shouldAutoSelect(score: c.score, hasFaces: c.hasFaces)
                 a.fileSizeBytes = c.fileSizeBytes
             }
             return a
@@ -271,7 +287,7 @@ class ScanViewModel: ObservableObject {
         // Phase B: deep pass in background (duplicates/similar/quality/size calibration)
         isBackgroundAnalyzing = true
         backgroundProgress = 0
-        backgroundLabel = "后台深度分析中"
+        backgroundLabel = L10n.bgDeepAnalysis
         backgroundAnalysisTask?.cancel()
         backgroundAnalysisTask = Task(priority: .utility) { [weak self] in
             guard let self else { return }
@@ -295,7 +311,7 @@ class ScanViewModel: ObservableObject {
                 if elapsed >= minimumFirstPassSeconds { break }
                 let t = Double(elapsed) / Double(max(1, minimumFirstPassSeconds))
                 progress = min(0.98, 0.55 + t * 0.43)
-                phaseLabel = "第一阶段：统计空间与类型 \(minimumFirstPassSeconds - elapsed)s"
+                phaseLabel = L10n.scanPhaseACountdown(minimumFirstPassSeconds - elapsed)
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
             }
         }
@@ -321,7 +337,8 @@ class ScanViewModel: ObservableObject {
         var scored = initialScored
         let total = max(raw.count, 1)
         let uncached = (0..<raw.count).filter { cached[raw[$0].id] == nil }
-        analyzedCount = raw.count - uncached.count
+        let baseAnalyzedCount = raw.count - uncached.count
+        analyzedCount = baseAnalyzedCount
 
         var newEntries: [DatabaseService.ScoreEntry] = []
         var qualityMap: [String: PhotoLibraryService.QualitySignals] = [:]
@@ -335,27 +352,43 @@ class ScanViewModel: ObservableObject {
             )
         }
 
-        backgroundLabel = "后台分析：照片评分"
+        backgroundLabel = L10n.bgScoring
         backgroundProgress = 0.10
 
         var nextPos = 0
-        let maxConcurrent = 8
-        await withTaskGroup(of: (Int, PhotoLibraryService.ScoreResult).self) { group in
-            while nextPos < min(maxConcurrent, uncached.count) {
-                let i = uncached[nextPos]
-                let asset = raw[i].asset
-                group.addTask {
-                    let r = await PhotoLibraryService.shared.score(asset: asset)
-                    return (i, r)
-                }
-                nextPos += 1
-            }
+        var inFlight = 0
+        var localAnalyzedCount = baseAnalyzedCount
+        var lastPublishedCount = baseAnalyzedCount
+        var lastPublishAt = Date.distantPast
+        let publishStride = 50
+        let publishInterval: TimeInterval = 0.35
 
-            for await (idx, result) in group {
+        await withTaskGroup(of: (Int, PhotoLibraryService.ScoreResult).self) { group in
+            func enqueueTasksIfNeeded() async {
+                // Keep UI responsive while users browse Timeline/Detail during deep scan.
+                let limit = await MainActor.run { self.isUserInteractingInDetail ? 2 : 4 }
+                while inFlight < limit && nextPos < uncached.count {
+                    let i = uncached[nextPos]
+                    let asset = raw[i].asset
+                    group.addTask {
+                        let r = await PhotoLibraryService.shared.score(asset: asset)
+                        return (i, r)
+                    }
+                    inFlight += 1
+                    nextPos += 1
+                }
+            }
+            await enqueueTasksIfNeeded()
+
+            while let (idx, result) = await group.next() {
+                inFlight = max(0, inFlight - 1)
                 if Task.isCancelled { return }
                 scored[idx].score = result.score
-                scored[idx].isSelected = result.score < AppConfig.deleteThreshold
-                analyzedCount += 1
+                scored[idx].isSelected = LibraryViewModel.shouldAutoSelect(
+                    score: result.score,
+                    hasFaces: result.hasFaces
+                )
+                localAnalyzedCount += 1
 
                 newEntries.append(DatabaseService.ScoreEntry(
                     localId:        raw[idx].id,
@@ -374,21 +407,19 @@ class ScanViewModel: ObservableObject {
                     isUnderExposed: result.isUnderExposed
                 )
 
-                if analyzedCount % 20 == 0 {
+                let now = Date()
+                let reachedStride = (localAnalyzedCount - lastPublishedCount) >= publishStride
+                let reachedInterval = now.timeIntervalSince(lastPublishAt) >= publishInterval
+                let finished = localAnalyzedCount >= total
+                if reachedStride || reachedInterval || finished {
+                    analyzedCount = localAnalyzedCount
+                    backgroundProgress = 0.10 + (Double(localAnalyzedCount) / Double(total)) * 0.45
                     allAssets = scored
+                    lastPublishedCount = localAnalyzedCount
+                    lastPublishAt = now
                 }
-                let ratio = Double(analyzedCount) / Double(total)
-                backgroundProgress = 0.10 + ratio * 0.45
 
-                if nextPos < uncached.count {
-                    let i = uncached[nextPos]
-                    let asset = raw[i].asset
-                    group.addTask {
-                        let r = await PhotoLibraryService.shared.score(asset: asset)
-                        return (i, r)
-                    }
-                    nextPos += 1
-                }
+                await enqueueTasksIfNeeded()
             }
         }
 
@@ -398,6 +429,9 @@ class ScanViewModel: ObservableObject {
             return
         }
 
+        if analyzedCount != localAnalyzedCount {
+            analyzedCount = localAnalyzedCount
+        }
         allAssets = scored
         store.setAssets(scored)
         await DatabaseService.shared.saveScores(newEntries)
@@ -408,11 +442,11 @@ class ScanViewModel: ObservableObject {
         let nonFavorite = scored.filter { !$0.asset.isFavorite }
         let newNonFavorite = nonFavorite.filter { newAssetIDs.contains($0.id) }
 
-        backgroundLabel = "后台分析：重复照片"
+        backgroundLabel = L10n.bgDuplicates
         backgroundProgress = 0.62
         let newDuplicateGroups = await service.findDuplicates(assets: newNonFavorite)
 
-        backgroundLabel = "后台分析：相似照片"
+        backgroundLabel = L10n.bgSimilar
         backgroundProgress = 0.74
         let newSimilarGroups = await service.findSimilar(assets: newNonFavorite)
 
@@ -421,7 +455,7 @@ class ScanViewModel: ObservableObject {
         duplicateGroups = mergedDuplicateGroups
         similarGroups = mergedSimilarGroups
 
-        backgroundLabel = "后台分析：低质量照片"
+        backgroundLabel = L10n.bgLowQuality
         backgroundProgress = 0.84
         lowQuality = service.findLowQuality(assets: nonFavorite, qualityMap: qualityMap)
 
@@ -451,7 +485,7 @@ class ScanViewModel: ObservableObject {
         store.setAssets(scored)
         buildSummary(assets: scored)
 
-        backgroundLabel = "后台分析：保存结果"
+        backgroundLabel = L10n.bgSaving
         backgroundProgress = 0.95
         await DatabaseService.shared.saveGroups(duplicateGroups + similarGroups)
         await DatabaseService.shared.saveScanRecord(
@@ -466,12 +500,12 @@ class ScanViewModel: ObservableObject {
         }
 
         backgroundProgress = 1.0
-        backgroundLabel = "后台分析完成"
+        backgroundLabel = L10n.bgComplete
         if phase == .done {
             finalizeScanDuration(scanStart: scanStart)
         }
         isBackgroundAnalyzing = false
-        phaseLabel = "分析完成"
+        phaseLabel = L10n.scanComplete
         progress = 1.0
         startBackgroundFileSizeHydration()
     }

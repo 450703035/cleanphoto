@@ -24,6 +24,7 @@ struct PhotoThumbnail: View {
     var height: CGFloat? = nil          // nil → square (size × size)
     var contentMode: ContentMode = .fill
     @State private var image: UIImage?
+    @State private var requestID: PHImageRequestID?
 
     var body: some View {
         let h = height ?? size
@@ -35,33 +36,43 @@ struct PhotoThumbnail: View {
             } else {
                 Rectangle()
                     .fill(AppColors.deepCard)
-                    .overlay(ProgressView().tint(.white.opacity(0.4)))
             }
         }
         .frame(width: size, height: h)
         .clipped()
-        .task { await load() }
+        .task(id: asset.localIdentifier) {
+            await load()
+        }
+        .onDisappear {
+            if let rid = requestID {
+                PHImageManager.default().cancelImageRequest(rid)
+                requestID = nil
+            }
+        }
     }
 
     private func load() async {
+        // Cancel any previous request for this view
+        if let rid = requestID {
+            PHImageManager.default().cancelImageRequest(rid)
+            requestID = nil
+        }
         let h = height ?? size
-        let s = CGSize(width: size * 2, height: h * 2)
+        let targetSize = CGSize(width: size * 2, height: h * 2)
         let opts = PHImageRequestOptions()
         opts.deliveryMode = .opportunistic
         opts.isSynchronous = false
+        opts.isNetworkAccessAllowed = false
         let phMode: PHImageContentMode = (contentMode == .fill) ? .aspectFill : .aspectFit
-        await withCheckedContinuation { cont in
-            PHImageManager.default().requestImage(
-                for: asset, targetSize: s,
-                contentMode: phMode, options: opts
-            ) { img, info in
-                let isDegraded = (info?[PHImageResultIsDegradedKey] as? Bool) == true
-                Task { @MainActor in image = img }
-                if !isDegraded {
-                    cont.resume()
-                }
+        let rid = PHImageManager.default().requestImage(
+            for: asset, targetSize: targetSize,
+            contentMode: phMode, options: opts
+        ) { img, _ in
+            Task { @MainActor in
+                if let img { image = img }
             }
         }
+        requestID = rid
     }
 }
 
@@ -86,7 +97,7 @@ struct LargePhotoCard: View {
                 HStack {
                     ScoreBadge(score: asset.score, fontSize: 12)
                     if isBest {
-                        Text("⭐ 最佳")
+                        Text("⭐ \(L10n.best)")
                             .font(.system(size: 11, weight: .bold))
                             .foregroundColor(Color(hex: "7c2d00"))
                             .padding(.horizontal, 8)
@@ -169,7 +180,7 @@ struct SmallPhotoCell: View {
 struct BottomDeleteBar: View {
     let count: Int
     let sizeLabel: String
-    var actionLabel: String = "删除所选"
+    var actionLabel: String = L10n.deleteSelected
     var color: Color = AppColors.red
     let onDelete: () -> Void
 
@@ -179,7 +190,7 @@ struct BottomDeleteBar: View {
             Button(action: onDelete) {
                 HStack {
                     Image(systemName: "trash")
-                    Text("\(actionLabel) \(count) 张\(sizeLabel.isEmpty ? "" : " · 释放 \(sizeLabel)")")
+                    Text(L10n.actionCount(actionLabel, count, size: sizeLabel))
                         .fontWeight(.bold)
                 }
                 .frame(maxWidth: .infinity)
@@ -211,7 +222,7 @@ struct SubScreenHeader: View {
                 Button(action: onBack) {
                     HStack(spacing: 4) {
                         Image(systemName: "chevron.left")
-                        Text("返回")
+                        Text(L10n.back)
                     }
                     .foregroundColor(AppColors.lightPurple)
                 }
@@ -251,15 +262,15 @@ struct DoneView: View {
     var body: some View {
         VStack(spacing: 16) {
             Text("🎉").font(.system(size: 64))
-            Text("清理完成！").font(.title2).bold().foregroundColor(AppColors.textPrimary)
+            Text(L10n.cleanComplete).font(.title2).bold().foregroundColor(AppColors.textPrimary)
             Text("\(count) \(label)")
                 .font(.largeTitle).bold()
                 .foregroundColor(AppColors.lightPurple)
-            Text("已移至废纸篓\n你的相册更整洁了 ✨")
+            Text(L10n.movedToTrash)
                 .multilineTextAlignment(.center)
                 .foregroundColor(AppColors.textSecondary)
                 .font(.subheadline)
-            Button("返回", action: onBack)
+            Button(L10n.back, action: onBack)
                 .buttonStyle(ApplePrimaryButtonStyle())
                 .tint(AppColors.purple)
                 .padding(.top, 8)
@@ -329,7 +340,7 @@ struct AlbumFolderCell: View {
             // Overlay info
             VStack(alignment: .leading, spacing: 1) {
                 HStack {
-                    Text("\(folder.assets.count)张 · \(folder.title)")
+                    Text(L10n.folderInfo(folder.assets.count, folder.title))
                         .font(.system(size: 9, weight: .bold))
                         .foregroundColor(.white)
                     Spacer()
@@ -406,10 +417,10 @@ func cornerMetaText(_ text: String, fontSize: CGFloat) -> some View {
 
 func mediaTypeTag(_ asset: PHAsset) -> String {
     let sub = asset.mediaSubtypes
-    if asset.mediaType == .video { return "视频" }
-    if sub.contains(.photoScreenshot) { return "截图" }
+    if asset.mediaType == .video { return L10n.tagVideo }
+    if sub.contains(.photoScreenshot) { return L10n.tagScreenshot }
     if sub.contains(.photoLive) { return "Live" }
-    if sub.contains(.photoPanorama) { return "全景" }
+    if sub.contains(.photoPanorama) { return L10n.tagPanorama }
     if sub.contains(.photoHDR) { return "HDR" }
-    return "照片"
+    return L10n.tagPhoto
 }

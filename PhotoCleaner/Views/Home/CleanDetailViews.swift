@@ -2,6 +2,8 @@ import SwiftUI
 import Photos
 import UniformTypeIdentifiers
 import AVKit
+import AVFoundation
+import UIKit
 
 // MARK: - Duplicates
 struct DuplicatesView: View {
@@ -24,13 +26,13 @@ struct DuplicatesView: View {
     var body: some View {
         ZStack(alignment: .bottom) {
             if done {
-                DoneView(count: deletableCount, label: "张重复照片") { dismiss() }
+                DoneView(count: deletableCount, label: L10n.dupLabel(deletableCount)) { dismiss() }
             } else {
                 VStack(spacing: 0) {
-                    SubScreenHeader(title: "重复与相似",
-                                    subtitle: "\(groups.count) 组",
+                    SubScreenHeader(title: L10n.duplicateAndSimilarTitle,
+                                    subtitle: L10n.groups(groups.count),
                                     onBack: { dismiss() })
-                    InfoBanner(text: "左滑整组卡片可取消合并，不删除，并转入“其他使用行为”", color: AppColors.amber)
+                    InfoBanner(text: L10n.cancelMergeHint, color: AppColors.amber)
 
                     ScrollView {
                         LazyVStack(spacing: 16) {
@@ -72,7 +74,9 @@ struct DuplicatesView: View {
             }
         }
         .navigationBarHidden(true)
-        .overlay((deleting || !mergingGroupIDs.isEmpty) ? ProgressView("处理中…").padding(24).background(AppColors.cardBG).cornerRadius(8) : nil)
+        .onAppear { vm.setDetailInteraction(true) }
+        .onDisappear { vm.setDetailInteraction(false) }
+        .overlay((deleting || !mergingGroupIDs.isEmpty) ? ProgressView(L10n.processing).padding(24).background(AppColors.cardBG).cornerRadius(8) : nil)
         .sheet(item: $viewerRequest) { request in
             if let binding = bindingForGroupAssets(groupID: request.groupID) {
                 FullScreenPhotoViewer(assets: binding, startIndex: request.startIndex)
@@ -137,7 +141,7 @@ struct DuplicateGroupCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text(group.groupType == .duplicate ? "🔁 重复" : "✨ 相似")
+                Text(group.groupType == .duplicate ? "🔁 \(L10n.duplicate)" : "✨ \(L10n.similar)")
                     .font(.caption).fontWeight(.semibold)
                     .foregroundColor(AppColors.textSecondary)
                     .textCase(.uppercase)
@@ -146,7 +150,7 @@ struct DuplicateGroupCard: View {
                     if isMerging {
                         ProgressView().tint(AppColors.purple)
                     } else {
-                        Text("合并")
+                        Text(L10n.merge)
                             .font(.system(size: 12, weight: .bold))
                             .foregroundColor(AppColors.lightPurple)
                     }
@@ -169,7 +173,7 @@ struct DuplicateGroupCard: View {
                         .onDrop(of: [UTType.text], delegate: BestDropDelegate { droppedID in
                             onPromoteBest(droppedID)
                         })
-                    Text("⭐ 最佳")
+                    Text("⭐ \(L10n.best)")
                         .font(.system(size: 9, weight: .bold))
                         .foregroundColor(Color(hex: "7c2d00"))
                         .padding(.horizontal, 5).padding(.vertical, 2)
@@ -245,9 +249,9 @@ private struct SwipeCancelMergeGroupCard<Content: View>: View {
     var body: some View {
         ZStack(alignment: .trailing) {
             RoundedRectangle(cornerRadius: 8)
-                .fill(AppColors.red.opacity(0.22))
+                    .fill(AppColors.red.opacity(0.22))
                 .overlay(
-                    Text("取消合并")
+                    Text(L10n.cancelMerge)
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundColor(AppColors.red)
                         .padding(.trailing, 12),
@@ -294,7 +298,7 @@ private struct SwipeCancelMergeGroupCard<Content: View>: View {
         )
         .overlay(alignment: .trailing) {
             if isOpen {
-                Button("取消合并") {
+                Button(L10n.cancelMerge) {
                     onCancel()
                     offsetX = 0
                     isOpen = false
@@ -356,15 +360,15 @@ struct ScreenshotCleanView: View {
     var body: some View {
         ZStack(alignment: .bottom) {
             if done {
-                DoneView(count: selected.count, label: "张截图") { dismiss() }
+                DoneView(count: selected.count, label: L10n.screenshotsDone(selected.count)) { dismiss() }
             } else {
                 VStack(spacing: 0) {
                     SubScreenHeader(
-                        title: "截图清理",
-                        subtitle: "\(assets.count)张 · 推荐删 \(assets.filter{$0.score < 45}.count)张",
+                        title: L10n.screenshotTitle,
+                        subtitle: L10n.screenshotSubtitle(assets.count, assets.filter { $0.score < 45 }.count),
                         onBack: { dismiss() },
                         trailing: AnyView(
-                            Button(isAllSelected ? "取消全选" : "全选") {
+                            Button(isAllSelected ? L10n.deselectAll : L10n.selectAll) {
                                 let next = !isAllSelected
                                 for i in assets.indices { assets[i].isSelected = next }
                             }
@@ -372,11 +376,11 @@ struct ScreenshotCleanView: View {
                         )
                     )
 
-                    InfoBanner(text: "已自动选中低质量截图，可手动调整", color: AppColors.red)
+                    InfoBanner(text: L10n.autoSelectedLow, color: AppColors.red)
 
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 8) {
-                            FilterChip(label: "全部", isActive: filterCategory == nil) { filterCategory = nil }
+                            FilterChip(label: L10n.all, isActive: filterCategory == nil) { filterCategory = nil }
                             ForEach(ScreenshotCategory.allCases, id: \.self) { c in
                                 FilterChip(label: c.chipLabel, isActive: filterCategory == c) { filterCategory = c }
                             }
@@ -388,7 +392,7 @@ struct ScreenshotCleanView: View {
                     if classifying {
                         HStack(spacing: 8) {
                             ProgressView(value: classifyProgress).tint(AppColors.purple)
-                            Text("分类中 \(Int(classifyProgress * 100))%")
+                            Text(L10n.classifying(Int(classifyProgress * 100)))
                                 .font(.caption)
                                 .foregroundColor(AppColors.textSecondary)
                         }
@@ -432,6 +436,8 @@ struct ScreenshotCleanView: View {
             }
         }
         .navigationBarHidden(true)
+        .onAppear { vm.setDetailInteraction(true) }
+        .onDisappear { vm.setDetailInteraction(false) }
         .task { await classifyScreenshots() }
         .sheet(item: $viewerRequest) { request in
             FullScreenPhotoViewer(assets: $assets, startIndex: request.startIndex)
@@ -468,12 +474,34 @@ struct ScreenshotCleanView: View {
         classifying = true
         classifyProgress = 0
         let total = max(assets.count, 1)
-
+        var pendingMap: [String: ScreenshotCategory] = [:]
+        var lastCommitAt = Date.distantPast
+        let commitStride = 20
+        let commitInterval: TimeInterval = 0.25
         for (idx, item) in assets.enumerated() {
             let c = await PhotoLibraryService.shared.classifyScreenshot(item.asset)
-            categoryMap[item.id] = c
-            classifyProgress = Double(idx + 1) / Double(total)
+            pendingMap[item.id] = c
+
+            let done = idx + 1
+            let now = Date()
+            let reachedStride = done % commitStride == 0
+            let reachedInterval = now.timeIntervalSince(lastCommitAt) >= commitInterval
+            let finished = done == total
+            if reachedStride || reachedInterval || finished {
+                if !pendingMap.isEmpty {
+                    categoryMap.merge(pendingMap) { _, new in new }
+                    pendingMap.removeAll(keepingCapacity: true)
+                }
+                classifyProgress = Double(done) / Double(total)
+                lastCommitAt = now
+                await Task.yield()
+            }
         }
+
+        if !pendingMap.isEmpty {
+            categoryMap.merge(pendingMap) { _, new in new }
+        }
+        classifyProgress = 1
         classifying = false
     }
 }
@@ -493,15 +521,15 @@ struct VideoCleanView: View {
     var body: some View {
         ZStack(alignment: .bottom) {
             if done {
-                DoneView(count: selected.count, label: "个视频") { dismiss() }
+                DoneView(count: selected.count, label: L10n.videosDone(selected.count)) { dismiss() }
             } else {
                 VStack(spacing: 0) {
                     SubScreenHeader(
-                        title: "大视频文件",
-                        subtitle: "\(assets.count)个视频，按大小排序",
+                        title: L10n.videoTitle,
+                        subtitle: L10n.videoSubtitle(assets.count),
                         onBack: { dismiss() },
                         trailing: AnyView(
-                            Button(isAllSelected ? "取消全选" : "全选") {
+                            Button(isAllSelected ? L10n.deselectAll : L10n.selectAll) {
                                 let next = !isAllSelected
                                 for i in assets.indices { assets[i].isSelected = next }
                             }
@@ -509,7 +537,7 @@ struct VideoCleanView: View {
                             .font(AppTypography.body)
                         )
                     )
-                    InfoBanner(text: "两列浏览；点视频原位小窗播放；点下方圆圈标记后可批量删除", color: AppColors.amber)
+                    InfoBanner(text: L10n.videoBanner, color: AppColors.amber)
 
                     GeometryReader { geo in
                         let colWidth = max(120, (geo.size.width - 34) / 2)
@@ -581,9 +609,13 @@ struct VideoCleanView: View {
         }
         .navigationBarHidden(true)
         .onAppear {
+            vm.setDetailInteraction(true)
             assets.sort { $0.sizeBytes > $1.sizeBytes }
         }
-        .onDisappear { playingAssetID = nil }
+        .onDisappear {
+            playingAssetID = nil
+            vm.setDetailInteraction(false)
+        }
     }
 
     private func waterfallColumns(itemWidth: CGFloat) -> (left: [Int], right: [Int]) {
@@ -635,7 +667,7 @@ struct VideoGridCell: View {
             ZStack(alignment: .bottomTrailing) {
                 Group {
                     if isPlaying, let player {
-                        VideoPlayer(player: player)
+                        InlineVideoPlayer(player: player)
                             .onAppear { player.play() }
                     } else {
                         PhotoThumbnail(
@@ -675,7 +707,7 @@ struct VideoGridCell: View {
 
             HStack(alignment: .center, spacing: 8) {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(asset.asset.creationDate?.formatted(date: .abbreviated, time: .omitted) ?? "未知日期")
+                    Text(asset.asset.creationDate?.formatted(date: .abbreviated, time: .omitted) ?? L10n.unknownDate)
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundColor(AppColors.textPrimary)
                         .lineLimit(1)
@@ -761,6 +793,35 @@ struct VideoGridCell: View {
     }
 }
 
+/// Lightweight inline video renderer based on AVPlayerLayer.
+/// Avoids AVPlayerViewController's status-bar/fullscreen side effects in scrolling grids.
+private struct InlineVideoPlayer: UIViewRepresentable {
+    let player: AVPlayer
+
+    func makeUIView(context: Context) -> PlayerView {
+        let view = PlayerView()
+        view.backgroundColor = .black
+        view.playerLayer.videoGravity = .resizeAspect
+        view.playerLayer.player = player
+        return view
+    }
+
+    func updateUIView(_ uiView: PlayerView, context: Context) {
+        if uiView.playerLayer.player !== player {
+            uiView.playerLayer.player = player
+        }
+    }
+
+    static func dismantleUIView(_ uiView: PlayerView, coordinator: ()) {
+        uiView.playerLayer.player = nil
+    }
+
+    final class PlayerView: UIView {
+        override static var layerClass: AnyClass { AVPlayerLayer.self }
+        var playerLayer: AVPlayerLayer { layer as! AVPlayerLayer }
+    }
+}
+
 // MARK: - Low Quality
 struct LowQualityCleanView: View {
     @State var assets: [PhotoAsset]
@@ -789,15 +850,15 @@ struct LowQualityCleanView: View {
     var body: some View {
         ZStack(alignment: .bottom) {
             if done {
-                DoneView(count: selected.count, label: "张低质量照片") { dismiss() }
+                DoneView(count: selected.count, label: L10n.lowQualityDone(selected.count)) { dismiss() }
             } else {
                 VStack(spacing: 0) {
                     SubScreenHeader(
-                        title: "低质量照片",
-                        subtitle: "共\(assets.count)张 · 已全选推荐",
+                        title: L10n.lowQualityTitle,
+                        subtitle: L10n.lowQualitySubtitle(assets.count),
                         onBack: { dismiss() },
                         trailing: AnyView(
-                            Button(isAllSelected ? "取消全选" : "全选") {
+                            Button(isAllSelected ? L10n.deselectAll : L10n.selectAll) {
                                 let next = !isAllSelected
                                 for i in assets.indices { assets[i].isSelected = next }
                             }
@@ -809,9 +870,9 @@ struct LowQualityCleanView: View {
                     // Filter chips
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 8) {
-                            FilterChip(label: "全部", isActive: filterReason == nil) { filterReason = nil }
+                            FilterChip(label: L10n.all, isActive: filterReason == nil) { filterReason = nil }
                             ForEach(LowQualityReason.allCases, id: \.self) { r in
-                                FilterChip(label: r.rawValue, isActive: filterReason == r) { filterReason = r }
+                                FilterChip(label: r.displayName, isActive: filterReason == r) { filterReason = r }
                             }
                         }
                         .padding(.horizontal).padding(.vertical, 8)
@@ -848,6 +909,8 @@ struct LowQualityCleanView: View {
             }
         }
         .navigationBarHidden(true)
+        .onAppear { vm.setDetailInteraction(true) }
+        .onDisappear { vm.setDetailInteraction(false) }
         .sheet(item: $viewerRequest) { request in
             FullScreenPhotoViewer(assets: $assets, startIndex: request.startIndex)
         }
@@ -893,7 +956,7 @@ private struct LowQualityGridCell: View {
                 }
                 Spacer()
                 HStack {
-                    cornerMetaText(asset.reason?.rawValue ?? mediaTypeTag(asset.asset), fontSize: 8)
+                    cornerMetaText(asset.reason?.displayName ?? mediaTypeTag(asset.asset), fontSize: 8)
                     Spacer()
                     SelectionStatusBadge(isSelected: asset.isSelected, size: 20)
                 }
@@ -932,15 +995,15 @@ struct FavoritesCleanView: View {
     var body: some View {
         ZStack(alignment: .bottom) {
             if done {
-                DoneView(count: selected.count, label: "张收藏照片") { dismiss() }
+                DoneView(count: selected.count, label: L10n.favoritesDone(selected.count)) { dismiss() }
             } else {
                 VStack(spacing: 0) {
                     SubScreenHeader(
-                        title: "收藏照片",
-                        subtitle: "\(assets.count)张 · 默认不勾选",
+                        title: L10n.favoritesTitle,
+                        subtitle: L10n.favoritesSubtitle(assets.count),
                         onBack: { dismiss() },
                         trailing: AnyView(
-                            Button(isAllSelected ? "取消全选" : "全选") {
+                            Button(isAllSelected ? L10n.deselectAll : L10n.selectAll) {
                                 let next = !isAllSelected
                                 for i in assets.indices { assets[i].isSelected = next }
                             }
@@ -948,7 +1011,7 @@ struct FavoritesCleanView: View {
                             .font(AppTypography.body)
                         )
                     )
-                    InfoBanner(text: "收藏照片默认不选，避免误删重要内容", color: AppColors.red)
+                    InfoBanner(text: L10n.favoriteBanner, color: AppColors.red)
 
                     ScrollView {
                         LazyVGrid(columns: [GridItem(.flexible(), spacing: 3), GridItem(.flexible(), spacing: 3), GridItem(.flexible(), spacing: 3)], spacing: 3) {
@@ -983,7 +1046,9 @@ struct FavoritesCleanView: View {
             }
         }
         .navigationBarHidden(true)
-        .overlay(deleting ? ProgressView("处理中…").padding(24).background(AppColors.cardBG).cornerRadius(8) : nil)
+        .onAppear { vm.setDetailInteraction(true) }
+        .onDisappear { vm.setDetailInteraction(false) }
+        .overlay(deleting ? ProgressView(L10n.processing).padding(24).background(AppColors.cardBG).cornerRadius(8) : nil)
         .sheet(item: $viewerRequest) { request in
             FullScreenPhotoViewer(assets: $assets, startIndex: request.startIndex)
         }
@@ -996,11 +1061,20 @@ private struct FavoritesViewerRequest: Identifiable {
 }
 
 // MARK: - Behavior-based cleanup
-private enum BehaviorFilter: String, CaseIterable {
-    case neverViewed = "从未查看"
-    case longUnused = "很久没看"
-    case olderThan3Years = "超过3年"
-    case olderThan5Years = "超过5年"
+private enum BehaviorFilter: CaseIterable {
+    case neverViewed
+    case longUnused
+    case olderThan3Years
+    case olderThan5Years
+
+    var title: String {
+        switch self {
+        case .neverViewed: return L10n.behaviorNeverViewed
+        case .longUnused: return L10n.behaviorLongUnused
+        case .olderThan3Years: return L10n.behaviorOlder3
+        case .olderThan5Years: return L10n.behaviorOlder5
+        }
+    }
 }
 
 struct BehaviorCleanView: View {
@@ -1036,15 +1110,15 @@ struct BehaviorCleanView: View {
     var body: some View {
         ZStack(alignment: .bottom) {
             if done {
-                DoneView(count: selected.count, label: "张照片") { dismiss() }
+                DoneView(count: selected.count, label: L10n.photosDone(selected.count)) { dismiss() }
             } else {
                 VStack(spacing: 0) {
                     SubScreenHeader(
-                        title: "其他使用行为",
-                        subtitle: "\(assets.count)张 · 已排除收藏",
+                        title: L10n.behaviorTitle,
+                        subtitle: L10n.behaviorSubtitle(assets.count),
                         onBack: { dismiss() },
                         trailing: AnyView(
-                            Button(isAllSelected ? "取消全选" : "全选") {
+                            Button(isAllSelected ? L10n.deselectAll : L10n.selectAll) {
                                 let next = !isAllSelected
                                 for i in assets.indices { assets[i].isSelected = next }
                             }
@@ -1052,12 +1126,12 @@ struct BehaviorCleanView: View {
                             .font(AppTypography.body)
                         )
                     )
-                    InfoBanner(text: filter == .neverViewed ? "iOS 暂不提供“从未查看”公开数据，本筛选暂不可用" : "按使用行为与时间筛选，可手动调整删除对象", color: AppColors.amber)
+                    InfoBanner(text: filter == .neverViewed ? L10n.behaviorNeverViewedBanner : L10n.behaviorBanner, color: AppColors.amber)
 
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 8) {
                             ForEach(BehaviorFilter.allCases, id: \.self) { f in
-                                FilterChip(label: f.rawValue, isActive: filter == f) { filter = f }
+                                FilterChip(label: f.title, isActive: filter == f) { filter = f }
                             }
                         }
                         .padding(.horizontal)
@@ -1097,7 +1171,9 @@ struct BehaviorCleanView: View {
             }
         }
         .navigationBarHidden(true)
-        .overlay(deleting ? ProgressView("处理中…").padding(24).background(AppColors.cardBG).cornerRadius(8) : nil)
+        .onAppear { vm.setDetailInteraction(true) }
+        .onDisappear { vm.setDetailInteraction(false) }
+        .overlay(deleting ? ProgressView(L10n.processing).padding(24).background(AppColors.cardBG).cornerRadius(8) : nil)
         .sheet(item: $viewerRequest) { request in
             FullScreenPhotoViewer(assets: $assets, startIndex: request.startIndex)
         }
@@ -1172,7 +1248,7 @@ private struct ScreenshotGridCell: View {
                 }
                 Spacer()
                 HStack {
-                    cornerMetaText(category?.rawValue ?? mediaTypeTag(asset.asset), fontSize: 8)
+                    cornerMetaText(category?.chipLabel ?? mediaTypeTag(asset.asset), fontSize: 8)
                     Spacer()
                     SelectionStatusBadge(isSelected: asset.isSelected, size: 20)
                 }

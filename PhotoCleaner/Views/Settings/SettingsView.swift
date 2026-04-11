@@ -3,6 +3,7 @@ import SwiftUI
 struct SettingsView: View {
     @EnvironmentObject var vm: ScanViewModel
     @AppStorage("themeMode") private var themeModeRaw = AppThemeMode.system.rawValue
+    @AppStorage("appLanguage") private var appLanguageRaw = AppLanguage.zh.rawValue
     @AppStorage("autoSelect")   private var autoSelect   = true
     @AppStorage("timeWeight")   private var timeWeight   = true
     @AppStorage("protectFaces") private var protectFaces = true
@@ -13,182 +14,183 @@ struct SettingsView: View {
     private var currentThemeMode: AppThemeMode {
         AppThemeMode(rawValue: themeModeRaw) ?? .system
     }
+    private var currentLanguage: AppLanguage {
+        AppLanguage(rawValue: appLanguageRaw) ?? .zh
+    }
 
     var body: some View {
-        ZStack {
-            AppColors.darkBG.ignoresSafeArea()
-            ScrollView {
-                VStack(spacing: 0) {
-                    // User header
-                    HStack(spacing: 14) {
-                        Circle()
-                            .fill(AppColors.deepCard)
-                            .frame(width: 52, height: 52)
-                            .overlay(Image(systemName: "person.fill").font(.title3).foregroundColor(.white))
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(L10n.userAccount).font(AppTypography.body.weight(.semibold)).foregroundColor(AppColors.textPrimary)
-                            Text(L10n.freeVersion).font(AppTypography.caption).foregroundColor(AppColors.textSecondary)
-                        }
-                        Spacer()
-                        Button(L10n.upgradePro) {}
-                            .buttonStyle(ApplePrimaryButtonStyle())
-                    }
-                    .padding()
-
-                    SettingsSectionHeader(title: L10n.appearance)
-
-                    settingsGroup {
-                        Menu {
-                            ForEach(AppThemeMode.allCases) { mode in
-                                Button(mode.title) { themeModeRaw = mode.rawValue }
+        NavigationStack {
+            ZStack {
+                AppColors.darkBG.ignoresSafeArea()
+                ScrollView {
+                    VStack(spacing: 0) {
+                        // User header
+                        HStack(spacing: 14) {
+                            Circle()
+                                .fill(AppColors.deepCard)
+                                .frame(width: 52, height: 52)
+                                .overlay(Image(systemName: "person.fill").font(.title3).foregroundColor(.white))
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(L10n.userAccount).font(AppTypography.body.weight(.semibold)).foregroundColor(AppColors.textPrimary)
+                                Text(L10n.freeVersion).font(AppTypography.caption).foregroundColor(AppColors.textSecondary)
                             }
-                        } label: {
+                            Spacer()
+                            Button(L10n.upgradePro) {}
+                                .buttonStyle(ApplePrimaryButtonStyle())
+                        }
+                        .padding()
+
+                        SettingsSectionHeader(title: L10n.appearance)
+
+                        settingsGroup {
+                            NavigationLink {
+                                ThemeModeSelectionView(themeModeRaw: $themeModeRaw)
+                            } label: {
+                                HStack(spacing: 12) {
+                                    iconBox("circle.lefthalf.filled", bg: AppColors.blue)
+                                    VStack(alignment: .leading, spacing: 1) {
+                                        Text(L10n.displayMode).foregroundColor(AppColors.textPrimary).font(AppTypography.body)
+                                        Text(L10n.followSystem).foregroundColor(AppColors.textTertiary).font(AppTypography.caption)
+                                    }
+                                    Spacer()
+                                    Text(currentThemeMode.title).foregroundColor(AppColors.textSecondary).font(AppTypography.caption)
+                                    Image(systemName: "chevron.right").font(.caption).foregroundColor(AppColors.textTertiary)
+                                }
+                                .padding(.horizontal).padding(.vertical, 10)
+                            }
+                            .buttonStyle(.plain)
+
+                            Divider().background(AppColors.separator).padding(.leading, 52)
+
+                            NavigationLink {
+                                LanguageSelectionView(appLanguageRaw: $appLanguageRaw)
+                            } label: {
+                                HStack(spacing: 12) {
+                                    iconBox("globe", bg: AppColors.green)
+                                    VStack(alignment: .leading, spacing: 1) {
+                                        Text(L10n.language).foregroundColor(AppColors.textPrimary).font(AppTypography.body)
+                                        Text(L10n.languageSubtitle).foregroundColor(AppColors.textTertiary).font(AppTypography.caption)
+                                    }
+                                    Spacer()
+                                    Text(currentLanguage.displayName).foregroundColor(AppColors.textSecondary).font(AppTypography.caption)
+                                    Image(systemName: "chevron.right").font(.caption).foregroundColor(AppColors.textTertiary)
+                                }
+                                .padding(.horizontal).padding(.vertical, 10)
+                            }
+                            .buttonStyle(.plain)
+                        }
+
+                        // Section: 清理设置
+                        SettingsSectionHeader(title: L10n.cleanSettings)
+
+                        settingsGroup {
+                            // Threshold row
+                            Button {
+                                showThresholdPicker.toggle()
+                            } label: {
+                                HStack(spacing: 12) {
+                                    iconBox("target", bg: AppColors.purple)
+                                    VStack(alignment: .leading, spacing: 1) {
+                                        Text(L10n.deleteThreshold).foregroundColor(AppColors.textPrimary).font(AppTypography.body)
+                                        Text(L10n.thresholdDesc(threshold)).foregroundColor(AppColors.textTertiary).font(.caption)
+                                    }
+                                    Spacer()
+                                    Text("\(threshold)").foregroundColor(AppColors.textTertiary).font(.subheadline)
+                                    Image(systemName: "chevron.right").font(.caption).foregroundColor(AppColors.textTertiary)
+                                }
+                                .padding(.horizontal).padding(.vertical, 10)
+                            }
+
+                            Divider().background(AppColors.separator).padding(.leading, 52)
+
+                            SettingsToggleRow(icon: "arrow.triangle.2.circlepath", iconBg: AppColors.green,
+                                              title: L10n.autoSelect, subtitle: L10n.autoSelectDesc,
+                                              isOn: $autoSelect)
+                            Divider().background(AppColors.separator).padding(.leading, 52)
+
+                            SettingsToggleRow(icon: "calendar", iconBg: AppColors.amber,
+                                              title: L10n.timeWeight, subtitle: L10n.timeWeightDesc,
+                                              isOn: $timeWeight)
+                            Divider().background(AppColors.separator).padding(.leading, 52)
+
+                            SettingsToggleRow(icon: "shield.fill", iconBg: AppColors.red,
+                                              title: L10n.protectFace, subtitle: L10n.protectFaceDesc,
+                                              isOn: $protectFaces)
+                        }
+
+                        // Threshold slider (expandable)
+                        if showThresholdPicker {
+                            VStack(spacing: 8) {
+                                HStack {
+                                    Text(L10n.currentThreshold(threshold)).font(AppTypography.body).foregroundColor(AppColors.textPrimary)
+                                    Spacer()
+                                }
+                                Slider(value: Binding(get: { Double(threshold) }, set: { threshold = Int($0) }),
+                                       in: 10...80, step: 1)
+                                    .tint(AppColors.purple)
+                                HStack {
+                                    Text(L10n.lenient).font(.caption).foregroundColor(AppColors.textSecondary)
+                                    Spacer()
+                                    Text(L10n.strict).font(.caption).foregroundColor(AppColors.textSecondary)
+                                }
+                            }
+                            .padding()
+                            .appleCardStyle()
+                            .padding(.horizontal)
+                            .padding(.top, 4)
+                        }
+
+                        // Section: 通知与隐私
+                        SettingsSectionHeader(title: L10n.notificationPrivacy)
+
+                        settingsGroup {
+                            SettingsToggleRow(icon: "bell.fill", iconBg: AppColors.blue,
+                                              title: L10n.dailyReminder, subtitle: L10n.dailyReminderDesc,
+                                              isOn: $dailyReminder)
+                            Divider().background(AppColors.separator).padding(.leading, 52)
+
                             HStack(spacing: 12) {
-                                iconBox("circle.lefthalf.filled", bg: AppColors.blue)
+                                iconBox("lock.fill", bg: AppColors.purple)
                                 VStack(alignment: .leading, spacing: 1) {
-                                    Text(L10n.displayMode).foregroundColor(AppColors.textPrimary).font(AppTypography.body)
-                                    Text(L10n.followSystem).foregroundColor(AppColors.textTertiary).font(AppTypography.caption)
+                                    Text(L10n.localAI).foregroundColor(AppColors.textPrimary).font(AppTypography.body)
+                                    Text(L10n.localAIDesc).foregroundColor(AppColors.textTertiary).font(.caption)
                                 }
                                 Spacer()
-                                Text(currentThemeMode.title).foregroundColor(AppColors.textSecondary).font(AppTypography.caption)
-                                Image(systemName: "chevron.up.chevron.down").font(.caption2).foregroundColor(AppColors.textTertiary)
-                            }
-                            .padding(.horizontal).padding(.vertical, 10)
-                        }
-
-                        Divider().background(AppColors.separator).padding(.leading, 52)
-
-                        Menu {
-                            ForEach(AppLanguage.allCases) { lang in
-                                Button(lang.displayName) {
-                                    UserDefaults.standard.set(lang.rawValue, forKey: "appLanguage")
-                                }
-                            }
-                        } label: {
-                            HStack(spacing: 12) {
-                                iconBox("globe", bg: AppColors.green)
-                                VStack(alignment: .leading, spacing: 1) {
-                                    Text(L10n.language).foregroundColor(AppColors.textPrimary).font(AppTypography.body)
-                                    Text(L10n.languageSubtitle).foregroundColor(AppColors.textTertiary).font(AppTypography.caption)
-                                }
-                                Spacer()
-                                Text(AppLanguage.current.displayName).foregroundColor(AppColors.textSecondary).font(AppTypography.caption)
-                                Image(systemName: "chevron.up.chevron.down").font(.caption2).foregroundColor(AppColors.textTertiary)
-                            }
-                            .padding(.horizontal).padding(.vertical, 10)
-                        }
-                    }
-
-                    // Section: 清理设置
-                    SettingsSectionHeader(title: L10n.cleanSettings)
-
-                    settingsGroup {
-                        // Threshold row
-                        Button {
-                            showThresholdPicker.toggle()
-                        } label: {
-                            HStack(spacing: 12) {
-                                iconBox("target", bg: AppColors.purple)
-                                VStack(alignment: .leading, spacing: 1) {
-                                    Text(L10n.deleteThreshold).foregroundColor(AppColors.textPrimary).font(AppTypography.body)
-                                    Text(L10n.thresholdDesc(threshold)).foregroundColor(AppColors.textTertiary).font(.caption)
-                                }
-                                Spacer()
-                                Text("\(threshold)").foregroundColor(AppColors.textTertiary).font(.subheadline)
+                                Text(L10n.enabled).foregroundColor(AppColors.textTertiary).font(.caption)
                                 Image(systemName: "chevron.right").font(.caption).foregroundColor(AppColors.textTertiary)
                             }
                             .padding(.horizontal).padding(.vertical, 10)
                         }
 
-                        Divider().background(AppColors.separator).padding(.leading, 52)
+                        // Section: 数据统计
+                        SettingsSectionHeader(title: L10n.statistics)
 
-                        SettingsToggleRow(icon: "arrow.triangle.2.circlepath", iconBg: AppColors.green,
-                                          title: L10n.autoSelect, subtitle: L10n.autoSelectDesc,
-                                          isOn: $autoSelect)
-                        Divider().background(AppColors.separator).padding(.leading, 52)
-
-                        SettingsToggleRow(icon: "calendar", iconBg: AppColors.amber,
-                                          title: L10n.timeWeight, subtitle: L10n.timeWeightDesc,
-                                          isOn: $timeWeight)
-                        Divider().background(AppColors.separator).padding(.leading, 52)
-
-                        SettingsToggleRow(icon: "shield.fill", iconBg: AppColors.red,
-                                          title: L10n.protectFace, subtitle: L10n.protectFaceDesc,
-                                          isOn: $protectFaces)
-                    }
-
-                    // Threshold slider (expandable)
-                    if showThresholdPicker {
-                        VStack(spacing: 8) {
-                            HStack {
-                                Text(L10n.currentThreshold(threshold)).font(AppTypography.body).foregroundColor(AppColors.textPrimary)
-                                Spacer()
-                            }
-                            Slider(value: Binding(get: { Double(threshold) }, set: { threshold = Int($0) }),
-                                   in: 10...80, step: 1)
-                                .tint(AppColors.purple)
-                            HStack {
-                                Text(L10n.lenient).font(.caption).foregroundColor(AppColors.textSecondary)
-                                Spacer()
-                                Text(L10n.strict).font(.caption).foregroundColor(AppColors.textSecondary)
-                            }
+                        settingsGroup {
+                            statRow(icon: "trash.fill", iconBg: AppColors.red,
+                                    title: L10n.totalFreed,
+                                    value: ByteCountFormatter.string(fromByteCount: stats.freedBytes, countStyle: .file))
+                            Divider().background(AppColors.separator).padding(.leading, 52)
+                            statRow(icon: "checkmark.circle.fill", iconBg: AppColors.green,
+                                    title: L10n.totalCleanups,
+                                    value: L10n.times(stats.scanCount))
+                            Divider().background(AppColors.separator).padding(.leading, 52)
+                            statRow(icon: "chart.bar.fill", iconBg: AppColors.amber,
+                                    title: L10n.healthImprovement,
+                                    value: stats.healthGain > 0 ? "+\(L10n.points(stats.healthGain))"
+                                         : stats.scanCount > 0  ? L10n.improving
+                                         :                        L10n.noData)
                         }
-                        .padding()
-                        .appleCardStyle()
-                        .padding(.horizontal)
-                        .padding(.top, 4)
+                        .task { stats = await DatabaseService.shared.loadCleaningStats() }
+
+                        // Version
+                        Text("PhotoCleaner v1.0.0")
+                            .font(.caption).foregroundColor(AppColors.textTertiary)
+                            .padding(.top, 24).padding(.bottom, 8)
                     }
-
-                    // Section: 通知与隐私
-                    SettingsSectionHeader(title: L10n.notificationPrivacy)
-
-                    settingsGroup {
-                        SettingsToggleRow(icon: "bell.fill", iconBg: AppColors.blue,
-                                          title: L10n.dailyReminder, subtitle: L10n.dailyReminderDesc,
-                                          isOn: $dailyReminder)
-                        Divider().background(AppColors.separator).padding(.leading, 52)
-
-                        HStack(spacing: 12) {
-                            iconBox("lock.fill", bg: AppColors.purple)
-                            VStack(alignment: .leading, spacing: 1) {
-                                Text(L10n.localAI).foregroundColor(AppColors.textPrimary).font(AppTypography.body)
-                                Text(L10n.localAIDesc).foregroundColor(AppColors.textTertiary).font(.caption)
-                            }
-                            Spacer()
-                            Text(L10n.enabled).foregroundColor(AppColors.textTertiary).font(.caption)
-                            Image(systemName: "chevron.right").font(.caption).foregroundColor(AppColors.textTertiary)
-                        }
-                        .padding(.horizontal).padding(.vertical, 10)
-                    }
-
-                    // Section: 数据统计
-                    SettingsSectionHeader(title: L10n.statistics)
-
-                    settingsGroup {
-                        statRow(icon: "trash.fill", iconBg: AppColors.red,
-                                title: L10n.totalFreed,
-                                value: ByteCountFormatter.string(fromByteCount: stats.freedBytes, countStyle: .file))
-                        Divider().background(AppColors.separator).padding(.leading, 52)
-                        statRow(icon: "checkmark.circle.fill", iconBg: AppColors.green,
-                                title: L10n.totalCleanups,
-                                value: L10n.times(stats.scanCount))
-                        Divider().background(AppColors.separator).padding(.leading, 52)
-                        statRow(icon: "chart.bar.fill", iconBg: AppColors.amber,
-                                title: L10n.healthImprovement,
-                                value: stats.healthGain > 0 ? "+\(L10n.points(stats.healthGain))"
-                                     : stats.scanCount > 0  ? L10n.improving
-                                     :                        L10n.noData)
-                    }
-                    .task { stats = await DatabaseService.shared.loadCleaningStats() }
-
-                    // Version
-                    Text("PhotoCleaner v1.0.0")
-                        .font(.caption).foregroundColor(AppColors.textTertiary)
-                        .padding(.top, 24).padding(.bottom, 8)
                 }
             }
+            .toolbar(.hidden, for: .navigationBar)
         }
-        .navigationBarHidden(true)
     }
 
     @ViewBuilder
@@ -232,5 +234,79 @@ struct SettingsSectionHeader: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal)
             .padding(.top, 20).padding(.bottom, 7)
+    }
+}
+
+private struct ThemeModeSelectionView: View {
+    @Binding var themeModeRaw: String
+
+    private var currentThemeMode: AppThemeMode {
+        AppThemeMode(rawValue: themeModeRaw) ?? .system
+    }
+
+    var body: some View {
+        ZStack {
+            AppColors.darkBG.ignoresSafeArea()
+            List {
+                ForEach(AppThemeMode.allCases) { mode in
+                    Button {
+                        themeModeRaw = mode.rawValue
+                    } label: {
+                        HStack {
+                            Text(mode.title)
+                                .foregroundColor(AppColors.textPrimary)
+                            Spacer()
+                            if mode == currentThemeMode {
+                                Image(systemName: "checkmark")
+                                    .foregroundColor(AppColors.lightPurple)
+                            }
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .listRowBackground(AppColors.deepCard)
+                }
+            }
+            .scrollContentBackground(.hidden)
+        }
+        .navigationTitle(L10n.displayMode)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar(.visible, for: .navigationBar)
+    }
+}
+
+private struct LanguageSelectionView: View {
+    @Binding var appLanguageRaw: String
+
+    private var currentLanguage: AppLanguage {
+        AppLanguage(rawValue: appLanguageRaw) ?? .zh
+    }
+
+    var body: some View {
+        ZStack {
+            AppColors.darkBG.ignoresSafeArea()
+            List {
+                ForEach(AppLanguage.allCases) { lang in
+                    Button {
+                        appLanguageRaw = lang.rawValue
+                    } label: {
+                        HStack {
+                            Text(lang.displayName)
+                                .foregroundColor(AppColors.textPrimary)
+                            Spacer()
+                            if lang == currentLanguage {
+                                Image(systemName: "checkmark")
+                                    .foregroundColor(AppColors.lightPurple)
+                            }
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .listRowBackground(AppColors.deepCard)
+                }
+            }
+            .scrollContentBackground(.hidden)
+        }
+        .navigationTitle(L10n.language)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar(.visible, for: .navigationBar)
     }
 }

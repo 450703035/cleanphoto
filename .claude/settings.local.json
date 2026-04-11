@@ -6,7 +6,12 @@
       "Bash(DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -scheme PhotoCleaner -destination 'platform=iOS Simulator,name=iPhone 16' build)",
       "Bash(DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -scheme PhotoCleaner -destination 'generic/platform=iOS Simulator' build)",
       "Bash(find /Users/danny/PhotoCleaner -type f -name \"*.swift\" -exec wc -l {} +)",
-      "Bash(wc -l /Users/danny/PhotoCleaner/PhotoCleaner/**/*.swift)"
+      "Bash(wc -l /Users/danny/PhotoCleaner/PhotoCleaner/**/*.swift)",
+      "Bash(find /Users/danny/PhotoCleaner -type f \\\\\\( -name \"*Timeline*\" -o -name \"*timeline*\" -o -name \"*waterfall*\" -o -name \"*Waterfall*\" \\\\\\) -exec ls -lh {} \\\\;)",
+      "Bash(find /Users/danny/PhotoCleaner -type f -name \"*.swift\" -exec grep -l \"LazyVGrid\\\\|LazyVStack\\\\|TimelineWaterfall\\\\|GridItem\" {} \\\\;)",
+      "Bash(git -C /Users/danny/PhotoCleaner log --oneline)",
+      "Bash(python3)",
+      "Bash(python3 -c ':*)"
     ]
   }
 }

@@ -214,15 +214,15 @@ struct SwipeDeleteToolView: View {
                 circleBtn(icon: "heart.fill", size: 64, color: AppColors.green) { doAction(.keep) }
             }
             HStack {
-                Text("← 删除").font(.caption).fontWeight(.semibold).foregroundColor(AppColors.red)
+                Text(L10n.swipeDelete).font(.caption).fontWeight(.semibold).foregroundColor(AppColors.red)
                 Spacer()
-                Text("点击 ↩ 撤销").font(.caption).foregroundColor(AppColors.textTertiary)
+                Text(L10n.tapUndo).font(.caption).foregroundColor(AppColors.textTertiary)
                 Spacer()
-                Text("保留 →").font(.caption).fontWeight(.semibold).foregroundColor(AppColors.green)
+                Text(L10n.swipeKeep).font(.caption).fontWeight(.semibold).foregroundColor(AppColors.green)
             }
             .padding(.horizontal, 30)
             if let last = lastAction {
-                Text(last == .delete ? "已标记删除 · 点击 ↩ 可撤销" : "已标记保留 · 点击 ↩ 可撤销")
+                Text(last == .delete ? L10n.markedDelete : L10n.markedKeep)
                     .font(.caption).foregroundColor(last == .delete ? AppColors.red : AppColors.green)
             }
         }
@@ -268,11 +268,11 @@ struct SwipeDeleteToolView: View {
                 if !isBack && activeVideoId != photo.id {
                     if drag.width < -20 {
                         Color.red.opacity(min(0.35, Double(-drag.width) / 300))
-                        swipeStamp("删除", color: AppColors.red, rotation: -15)
+                        swipeStamp(L10n.deleteStamp, color: AppColors.red, rotation: -15)
                     }
                     if drag.width > 20 {
                         Color.green.opacity(min(0.35, Double(drag.width) / 300))
-                        swipeStamp("保留", color: AppColors.green, rotation: 15)
+                        swipeStamp(L10n.keepStamp, color: AppColors.green, rotation: 15)
                     }
                 }
 
@@ -334,7 +334,7 @@ struct SwipeDeleteToolView: View {
                             .foregroundColor(AppColors.textSecondary)
                             .lineLimit(1)
                     } else {
-                        Text("无位置信息")
+                        Text(L10n.noLocation)
                             .font(.system(size: 12))
                             .foregroundColor(AppColors.textTertiary)
                     }
@@ -424,16 +424,16 @@ struct SwipeDeleteToolView: View {
 
     private func mediaCategory(_ asset: PHAsset) -> String {
         let sub = asset.mediaSubtypes
-        if sub.contains(.photoScreenshot) { return "截图" }
-        if sub.contains(.photoLive) { return "实况照片" }
-        if sub.contains(.photoPanorama) { return "全景照片" }
-        if sub.contains(.photoHDR) { return "HDR 照片" }
+        if sub.contains(.photoScreenshot) { return L10n.mediaScreenshot }
+        if sub.contains(.photoLive) { return L10n.mediaLivePhoto }
+        if sub.contains(.photoPanorama) { return L10n.mediaPanorama }
+        if sub.contains(.photoHDR) { return L10n.mediaHDR }
         if asset.mediaType == .video {
-            if sub.contains(.videoTimelapse) { return "延时摄影" }
-            if sub.contains(.videoHighFrameRate) { return "慢动作视频" }
-            return "视频"
+            if sub.contains(.videoTimelapse) { return L10n.mediaTimelapse }
+            if sub.contains(.videoHighFrameRate) { return L10n.mediaSlomo }
+            return L10n.mediaVideo
         }
-        return "普通照片"
+        return L10n.mediaPhoto
     }
 
     private func loadAssets() async {
@@ -534,7 +534,7 @@ struct SwipeDeleteToolView: View {
 struct PhotoInfoSheet: View {
     let photo: PhotoAsset
     @Environment(\.dismiss) private var dismiss
-    @State private var locationText: String = "加载中…"
+    @State private var locationText: String = L10n.loading
     @State private var fileType: String = ""
     @State private var fileSize: String = ""
 
@@ -556,42 +556,42 @@ struct PhotoInfoSheet: View {
                     .padding(.vertical, 8)
                 }
 
-                Section("日期与时间") {
-                    infoRow(icon: "calendar", label: "日期", value: formatted(photo.creationDate, style: .long))
-                    infoRow(icon: "clock", label: "时间", value: formatted(photo.creationDate, timeStyle: .medium))
+                Section(L10n.dateAndTime) {
+                    infoRow(icon: "calendar", label: L10n.dateLabel, value: formatted(photo.creationDate, style: .long))
+                    infoRow(icon: "clock", label: L10n.timeLabel, value: formatted(photo.creationDate, timeStyle: .medium))
                 }
 
-                Section("位置") {
-                    infoRow(icon: "mappin.and.ellipse", label: "地点", value: locationText)
+                Section(L10n.locationSection) {
+                    infoRow(icon: "mappin.and.ellipse", label: L10n.locationLabel, value: locationText)
                 }
 
-                Section("文件信息") {
-                    infoRow(icon: "doc", label: "文件名", value: filename())
-                    infoRow(icon: "aspectratio", label: "分辨率", value: "\(asset.pixelWidth) × \(asset.pixelHeight)")
+                Section(L10n.fileInfo) {
+                    infoRow(icon: "doc", label: L10n.fileName, value: filename())
+                    infoRow(icon: "aspectratio", label: L10n.resolution, value: "\(asset.pixelWidth) × \(asset.pixelHeight)")
                     if !fileSize.isEmpty {
-                        infoRow(icon: "internaldrive", label: "大小", value: fileSize)
+                        infoRow(icon: "internaldrive", label: L10n.sizeLabel, value: fileSize)
                     }
                     if !fileType.isEmpty {
-                        infoRow(icon: "photo", label: "格式", value: fileType)
+                        infoRow(icon: "photo", label: L10n.format, value: fileType)
                     }
                     if asset.mediaType == .video {
-                        infoRow(icon: "video", label: "时长", value: durationStr(asset.duration))
+                        infoRow(icon: "video", label: L10n.duration, value: durationStr(asset.duration))
                     }
                 }
 
-                Section("属性") {
-                    infoRow(icon: "star.fill", label: "AI 评分", value: "\(photo.score)  \(photo.score.scoreLabel)")
+                Section(L10n.attributes) {
+                    infoRow(icon: "star.fill", label: L10n.aiScore, value: "\(photo.score)  \(photo.score.scoreLabel)")
                     if asset.isFavorite {
-                        infoRow(icon: "heart.fill", label: "收藏", value: "已收藏")
+                        infoRow(icon: "heart.fill", label: L10n.favorited, value: L10n.favoritedYes)
                     }
-                    infoRow(icon: "sparkles", label: "类型", value: mediaCategory(asset))
+                    infoRow(icon: "sparkles", label: L10n.typeLabel, value: mediaCategory(asset))
                 }
             }
-            .navigationTitle("照片信息")
+            .navigationTitle(L10n.photoInfo)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("完成") { dismiss() }
+                    Button(L10n.done) { dismiss() }
                 }
             }
         }
@@ -619,12 +619,12 @@ struct PhotoInfoSheet: View {
             let geocoder = CLGeocoder()
             if let marks = try? await geocoder.reverseGeocodeLocation(loc), let p = marks.first {
                 let parts = [p.locality ?? p.administrativeArea, p.country].compactMap { $0 }
-                locationText = parts.isEmpty ? "位置未知" : parts.joined(separator: ", ")
+                locationText = parts.isEmpty ? L10n.unknownLocation : parts.joined(separator: ", ")
             } else {
-                locationText = "位置未知"
+                locationText = L10n.unknownLocation
             }
         } else {
-            locationText = "无位置信息"
+            locationText = L10n.noLocation
         }
 
         let resources = PHAssetResource.assetResources(for: asset)
@@ -644,12 +644,12 @@ struct PhotoInfoSheet: View {
     }
 
     private func filename() -> String {
-        PHAssetResource.assetResources(for: asset).first?.originalFilename ?? "未知"
+        PHAssetResource.assetResources(for: asset).first?.originalFilename ?? L10n.unknown
     }
 
     private func formatted(_ date: Date, style: DateFormatter.Style = .none, timeStyle: DateFormatter.Style = .none) -> String {
         let df = DateFormatter()
-        df.locale = Locale(identifier: "zh_CN")
+        df.locale = Locale(identifier: L10n.dateLocaleIdentifier)
         df.dateStyle = style
         df.timeStyle = timeStyle
         return df.string(from: date)
@@ -669,20 +669,20 @@ struct PhotoInfoSheet: View {
             "public.tiff": "TIFF", "com.apple.quicktime-movie": "MOV",
             "public.mpeg-4": "MP4", "public.mpeg-4-video": "MP4",
         ]
-        return map[uti] ?? uti.components(separatedBy: ".").last?.uppercased() ?? "未知"
+        return map[uti] ?? uti.components(separatedBy: ".").last?.uppercased() ?? L10n.unknown
     }
 
     private func mediaCategory(_ asset: PHAsset) -> String {
         let sub = asset.mediaSubtypes
-        if sub.contains(.photoScreenshot) { return "截图" }
-        if sub.contains(.photoLive) { return "实况照片" }
-        if sub.contains(.photoPanorama) { return "全景照片" }
-        if sub.contains(.photoHDR) { return "HDR 照片" }
+        if sub.contains(.photoScreenshot) { return L10n.mediaScreenshot }
+        if sub.contains(.photoLive) { return L10n.mediaLivePhoto }
+        if sub.contains(.photoPanorama) { return L10n.mediaPanorama }
+        if sub.contains(.photoHDR) { return L10n.mediaHDR }
         if asset.mediaType == .video {
-            if sub.contains(.videoTimelapse) { return "延时摄影" }
-            if sub.contains(.videoHighFrameRate) { return "慢动作视频" }
-            return "视频"
+            if sub.contains(.videoTimelapse) { return L10n.mediaTimelapse }
+            if sub.contains(.videoHighFrameRate) { return L10n.mediaSlomo }
+            return L10n.mediaVideo
         }
-        return "普通照片"
+        return L10n.mediaPhoto
     }
 }

@@ -7,6 +7,7 @@ import AVKit
 
 struct TimelineView: View {
     @EnvironmentObject var vm: LibraryViewModel
+    @EnvironmentObject var scanVM: ScanViewModel
     @State private var viewMode: TimelineMode = .list
     @State private var selectedFolder: AlbumFolder? = nil
     @State private var selectedDay: DayInfo? = nil
@@ -23,6 +24,16 @@ struct TimelineView: View {
         return min(max(vm.scoringProgress, 0), 1.0)
     }
 
+    private var shouldShowGridPlaceholder: Bool {
+        if vm.isLoading && vm.allAssets.isEmpty { return true }
+        switch viewMode {
+        case .list, .waterfall:
+            return !vm.allAssets.isEmpty && vm.yearGroups.isEmpty
+        case .calendar:
+            return !vm.allAssets.isEmpty && vm.dayMap.isEmpty
+        }
+    }
+
     var body: some View {
         NavigationStack {
             ZStack {
@@ -30,13 +41,13 @@ struct TimelineView: View {
                 VStack(spacing: 0) {
                     // ── Main header ──────────────────────────────────────
                     HStack {
-                        Text("时间线")
+                        Text(L10n.timeline)
                             .font(AppTypography.sectionTitle).foregroundColor(AppColors.textPrimary)
                         Spacer()
                         Picker("", selection: $viewMode) {
-                            Text("列表").tag(TimelineMode.list)
-                            Text("日历").tag(TimelineMode.calendar)
-                            Text("瀑布").tag(TimelineMode.waterfall)
+                            Text(L10n.listMode).tag(TimelineMode.list)
+                            Text(L10n.calendarMode).tag(TimelineMode.calendar)
+                            Text(L10n.waterfallMode).tag(TimelineMode.waterfall)
                         }
                         .pickerStyle(.segmented)
                         .frame(width: 190)
@@ -48,7 +59,7 @@ struct TimelineView: View {
                     // ── Calendar sub-header: year + legend ───────────────
                     if viewMode == .calendar {
                         HStack(alignment: .center, spacing: 0) {
-                            Text("\(calendarYear)年")
+                            Text(L10n.yearLabel(calendarYear))
                                 .font(.system(size: 17, weight: .semibold))
                                 .foregroundColor(AppColors.lightPurple)
                             Text(vm.yearSize(calendarYear).formattedFileSize)
@@ -59,10 +70,10 @@ struct TimelineView: View {
                             // Compact inline legend
                             HStack(spacing: 8) {
                                 ForEach([
-                                    (Color(hex: "D3F9D8"), "少"),
-                                    (Color(hex: "69DB7C"), "中"),
-                                    (Color(hex: "FFD43B"), "多"),
-                                    (Color(hex: "FF6B6B"), "满")
+                                    (Color(hex: "D3F9D8"), L10n.legendFew),
+                                    (Color(hex: "69DB7C"), L10n.legendMedium),
+                                    (Color(hex: "FFD43B"), L10n.legendMany),
+                                    (Color(hex: "FF6B6B"), L10n.legendFull)
                                 ], id: \.1) { color, label in
                                     HStack(spacing: 2) {
                                         RoundedRectangle(cornerRadius: 2)
@@ -99,15 +110,15 @@ struct TimelineView: View {
                                 .tint(AppColors.lightPurple)
                                 .padding(.horizontal)
                             Text(vm.isLoading && vm.scoringProgress >= 1.0
-                                 ? "数据刷新中…"
-                                 : "照片打分中 \(Int(displayProgress * 100))%")
+                                 ? L10n.processing
+                                 : L10n.scoringPhotos(Int(displayProgress * 100)))
                                 .font(.system(size: 10))
                                 .foregroundColor(AppColors.textSecondary)
                         }
                         .padding(.bottom, 6)
                     }
 
-                    if vm.isLoading && vm.allAssets.isEmpty {
+                    if shouldShowGridPlaceholder {
                         Spacer()
                         TimelineLoadingPlaceholder(mode: viewMode)
                         Spacer()
@@ -128,29 +139,55 @@ struct TimelineView: View {
             .sheet(item: $selectedDay) { day in
                 DayPhotoDetailView(dayInfo: day, selectionOverrides: vm.selectionOverrides)
             }
-            .task { await vm.load() }
+            .task {
+                try? await Task.sleep(nanoseconds: 150_000_000)
+                await vm.load()
+            }
+            .onAppear {
+                vm.setTimelineInteractionActive(true)
+                scanVM.setDetailInteraction(true)
+            }
+            .onDisappear {
+                vm.setTimelineInteractionActive(false)
+                scanVM.setDetailInteraction(false)
+            }
         }
     }
 }
 
 private struct TimelineLoadingPlaceholder: View {
     let mode: TimelineView.TimelineMode
+    private let cols = [
+        GridItem(.flexible(), spacing: 8),
+        GridItem(.flexible(), spacing: 8),
+        GridItem(.flexible(), spacing: 8)
+    ]
 
     var body: some View {
-        VStack(spacing: 12) {
-            ProgressView("正在加载时间线…")
+        VStack(spacing: 10) {
+            ProgressView(L10n.loading)
                 .foregroundColor(AppColors.textSecondary)
             if mode != .calendar {
-                VStack(spacing: 8) {
-                    RoundedRectangle(cornerRadius: 10)
-                        .fill(AppColors.cardBG.opacity(0.7))
-                        .frame(height: 18)
-                    HStack(spacing: 8) {
-                        RoundedRectangle(cornerRadius: 10).fill(AppColors.cardBG.opacity(0.7))
-                        RoundedRectangle(cornerRadius: 10).fill(AppColors.cardBG.opacity(0.7))
-                        RoundedRectangle(cornerRadius: 10).fill(AppColors.cardBG.opacity(0.7))
+                LazyVGrid(columns: cols, spacing: 8) {
+                    ForEach(0..<9, id: \.self) { _ in
+                        RoundedRectangle(cornerRadius: 10)
+                            .fill(AppColors.cardBG.opacity(0.8))
+                            .frame(height: 92)
+                            .overlay(
+                                Text(L10n.loading)
+                                    .font(.system(size: 11, weight: .semibold))
+                                    .foregroundColor(AppColors.textSecondary.opacity(0.9))
+                            )
                     }
-                    .frame(height: 110)
+                }
+                .padding(.horizontal, 16)
+            } else {
+                VStack(spacing: 8) {
+                    ForEach(0..<4, id: \.self) { _ in
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(AppColors.cardBG.opacity(0.8))
+                            .frame(height: 34)
+                    }
                 }
                 .padding(.horizontal, 16)
             }
@@ -184,18 +221,8 @@ struct TimelineListView: View {
 
                     ForEach(vm.sortedYears, id: \.self) { year in
                         Color.clear
-                            .frame(height: 0)
-                            .background(
-                                GeometryReader { geo in
-                                    Color.clear.preference(
-                                        key: TimelineYearHeaderOffsetKey.self,
-                                        value: [year: geo.frame(in: .named("timelineListScroll")).minY]
-                                    )
-                                }
-                            )
-                            .onAppear {
-                                if stickyYear == nil { stickyYear = year }
-                            }
+                            .frame(height: 1)
+                            .onAppear { stickyYear = year }
 
                         if year != visibleYear {
                             HStack(spacing: 6) {
@@ -207,12 +234,12 @@ struct TimelineListView: View {
                                     .foregroundColor(AppColors.textSecondary)
                                 let selYear = vm.yearSelectedSize(year)
                                 if selYear > 0 {
-                                    Text("· 删 \(selYear.formattedFileSize)")
+                                    Text(L10n.deleteSize(selYear.formattedFileSize))
                                         .font(.system(size: 11))
                                         .foregroundColor(AppColors.red)
                                 }
                                 Spacer()
-                                Text("点击进入 · 长按删除")
+                                Text(L10n.tapEnterLongDelete)
                                     .font(.caption)
                                     .foregroundColor(AppColors.textTertiary)
                             }
@@ -233,7 +260,7 @@ struct TimelineListView: View {
                                         .foregroundColor(AppColors.textTertiary)
                                     let sel = vm.monthSelectedSize(year: year, month: month)
                                     if sel > 0 {
-                                        Text("· 删 \(sel.formattedFileSize)")
+                                        Text(L10n.deleteSize(sel.formattedFileSize))
                                             .font(.system(size: 10))
                                             .foregroundColor(AppColors.red)
                                     }
@@ -257,17 +284,6 @@ struct TimelineListView: View {
                 }
                 .padding(.bottom, 20)
             }
-            .coordinateSpace(name: "timelineListScroll")
-            .onPreferenceChange(TimelineYearHeaderOffsetKey.self) { offsets in
-                guard !offsets.isEmpty else { return }
-                let threshold: CGFloat = 42
-                let sorted = offsets.sorted { $0.value < $1.value }
-                if let reached = sorted.last(where: { $0.value <= threshold }) {
-                    stickyYear = reached.key
-                } else if let first = sorted.first {
-                    stickyYear = first.key
-                }
-            }
 
             if let year = visibleYear {
                 HStack(spacing: 6) {
@@ -279,18 +295,32 @@ struct TimelineListView: View {
                         .foregroundColor(AppColors.textSecondary)
                     let selYear = vm.yearSelectedSize(year)
                     if selYear > 0 {
-                        Text("· 删 \(selYear.formattedFileSize)")
+                        Text(L10n.deleteSize(selYear.formattedFileSize))
                             .font(.system(size: 11))
                             .foregroundColor(AppColors.red)
                     }
                     Spacer()
-                    Text("点击进入 · 长按删除")
+                    Text(L10n.tapEnterLongDelete)
                         .font(.caption)
                         .foregroundColor(AppColors.textTertiary)
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 8)
                 .background(AppColors.darkBG.opacity(0.98))
+            }
+        }
+        .onAppear {
+            if stickyYear == nil {
+                stickyYear = vm.sortedYears.first
+            }
+        }
+        .onChange(of: vm.sortedYears) { years in
+            guard let current = stickyYear else {
+                stickyYear = years.first
+                return
+            }
+            if !years.contains(current) {
+                stickyYear = years.first
             }
         }
         // Pull-to-refresh → wipe cached scores and rescore everything
@@ -303,6 +333,12 @@ struct TimelineListView: View {
 struct TimelineWaterfallView: View {
     @ObservedObject var vm: LibraryViewModel
     @State private var assets: [PhotoAsset] = []
+    @State private var sectionLayouts: [WaterfallSectionLayout] = []
+    @State private var cachedItemWidth: CGFloat = 0
+    @State private var pendingAssetsSnapshot: [PhotoAsset]? = nil
+    @State private var isScrollInteracting = false
+    @State private var scrollIdleTask: Task<Void, Never>? = nil
+    @State private var layoutRebuildTask: Task<Void, Never>? = nil
     @State private var viewerRequest: PhotoViewerRequest? = nil
     @State private var deleting = false
     @State private var playingVideoAssetID: String? = nil
@@ -314,17 +350,22 @@ struct TimelineWaterfallView: View {
         ZStack(alignment: .bottom) {
             GeometryReader { geo in
                 let colWidth = max(120, (geo.size.width - 34) / 2)
-                let indexMap = Dictionary(uniqueKeysWithValues: assets.enumerated().map { ($0.element.id, $0.offset) })
-                let sections = monthSections(from: assets)
 
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0, pinnedViews: .sectionHeaders) {
+                        Color.clear
+                            .frame(height: 0)
+                            .onAppear { updateLayoutWidthIfNeeded(colWidth, force: true) }
+                            .onChange(of: colWidth) { newWidth in
+                                updateLayoutWidthIfNeeded(newWidth, force: true)
+                            }
+
                         HStack(spacing: 12) {
-                            Text("共\(assets.count)项（照片+视频）")
+                            Text(L10n.totalItems(assets.count))
                                 .font(.system(size: 12))
                                 .foregroundColor(AppColors.textSecondary)
                             Spacer()
-                            Button(isAllSelected ? "取消全选" : "全选") {
+                            Button(isAllSelected ? L10n.deselectAll : L10n.selectAll) {
                                 let next = !isAllSelected
                                 for i in assets.indices {
                                     assets[i].isSelected = next
@@ -337,50 +378,51 @@ struct TimelineWaterfallView: View {
                         .padding(.horizontal, 12)
                         .padding(.vertical, 8)
 
-                        ForEach(sections) { section in
+                        ForEach(sectionLayouts) { section in
                             Section {
-                                let sectionIndices = section.assets.compactMap { indexMap[$0.id] }
-                                let columns = waterfallColumns(indices: sectionIndices, itemWidth: colWidth)
-
                                 HStack(alignment: .top, spacing: 10) {
-                                    LazyVStack(spacing: 10) {
-                                        ForEach(columns.left, id: \.self) { idx in
-                                            TimelineWaterfallCell(
-                                                asset: $assets[idx],
-                                                itemWidth: colWidth,
-                                                isVideoPlaying: playingVideoAssetID == assets[idx].id,
-                                                onPhotoTap: { toggle(index: idx) },
-                                                onVideoPlayToggle: {
-                                                    if playingVideoAssetID == assets[idx].id {
-                                                        playingVideoAssetID = nil
-                                                    } else {
-                                                        playingVideoAssetID = assets[idx].id
-                                                    }
-                                                },
-                                                onVideoSelectToggle: { toggle(index: idx) },
-                                                onDoubleTap: { viewerRequest = PhotoViewerRequest(startIndex: idx) }
-                                            )
-                                            .id(assets[idx].id)
+                                    VStack(spacing: 10) {
+                                        ForEach(section.left, id: \.self) { idx in
+                                            if assets.indices.contains(idx) {
+                                                TimelineWaterfallCell(
+                                                    asset: $assets[idx],
+                                                    itemWidth: colWidth,
+                                                    isVideoPlaying: playingVideoAssetID == assets[idx].id,
+                                                    onPhotoTap: { toggle(index: idx) },
+                                                    onVideoPlayToggle: {
+                                                        if playingVideoAssetID == assets[idx].id {
+                                                            playingVideoAssetID = nil
+                                                        } else {
+                                                            playingVideoAssetID = assets[idx].id
+                                                        }
+                                                    },
+                                                    onVideoSelectToggle: { toggle(index: idx) },
+                                                    onDoubleTap: { viewerRequest = PhotoViewerRequest(startIndex: idx) }
+                                                )
+                                                .id(assets[idx].id)
+                                            }
                                         }
                                     }
-                                    LazyVStack(spacing: 10) {
-                                        ForEach(columns.right, id: \.self) { idx in
-                                            TimelineWaterfallCell(
-                                                asset: $assets[idx],
-                                                itemWidth: colWidth,
-                                                isVideoPlaying: playingVideoAssetID == assets[idx].id,
-                                                onPhotoTap: { toggle(index: idx) },
-                                                onVideoPlayToggle: {
-                                                    if playingVideoAssetID == assets[idx].id {
-                                                        playingVideoAssetID = nil
-                                                    } else {
-                                                        playingVideoAssetID = assets[idx].id
-                                                    }
-                                                },
-                                                onVideoSelectToggle: { toggle(index: idx) },
-                                                onDoubleTap: { viewerRequest = PhotoViewerRequest(startIndex: idx) }
-                                            )
-                                            .id(assets[idx].id)
+                                    VStack(spacing: 10) {
+                                        ForEach(section.right, id: \.self) { idx in
+                                            if assets.indices.contains(idx) {
+                                                TimelineWaterfallCell(
+                                                    asset: $assets[idx],
+                                                    itemWidth: colWidth,
+                                                    isVideoPlaying: playingVideoAssetID == assets[idx].id,
+                                                    onPhotoTap: { toggle(index: idx) },
+                                                    onVideoPlayToggle: {
+                                                        if playingVideoAssetID == assets[idx].id {
+                                                            playingVideoAssetID = nil
+                                                        } else {
+                                                            playingVideoAssetID = assets[idx].id
+                                                        }
+                                                    },
+                                                    onVideoSelectToggle: { toggle(index: idx) },
+                                                    onDoubleTap: { viewerRequest = PhotoViewerRequest(startIndex: idx) }
+                                                )
+                                                .id(assets[idx].id)
+                                            }
                                         }
                                     }
                                 }
@@ -404,6 +446,11 @@ struct TimelineWaterfallView: View {
                     }
                     .padding(.bottom, selected.isEmpty ? 20 : 90)
                 }
+                .simultaneousGesture(
+                    DragGesture(minimumDistance: 2)
+                        .onChanged { _ in markScrollInteracting() }
+                        .onEnded { _ in scheduleScrollIdleFlush() }
+                )
             }
 
             if !selected.isEmpty {
@@ -419,21 +466,43 @@ struct TimelineWaterfallView: View {
                 }
             }
         }
-        .overlay(deleting ? ProgressView("删除中…").padding(24).background(AppColors.cardBG).cornerRadius(14) : nil)
-        .onAppear { syncFromViewModel() }
-        .onReceive(vm.$allAssets) { _ in syncFromViewModel() }
-        .onDisappear { playingVideoAssetID = nil }
+        .overlay(deleting ? ProgressView(L10n.deleting).padding(24).background(AppColors.cardBG).cornerRadius(14) : nil)
+        .onAppear {
+            syncFromViewModel()
+            if cachedItemWidth > 0 {
+                rebuildSectionLayouts(itemWidth: cachedItemWidth)
+            }
+        }
+        .onReceive(vm.$allAssets) { latestAssets in
+            if isScrollInteracting {
+                pendingAssetsSnapshot = latestAssets
+            } else {
+                syncFromAssets(latestAssets)
+            }
+        }
+        .onDisappear {
+            playingVideoAssetID = nil
+            scrollIdleTask?.cancel()
+            layoutRebuildTask?.cancel()
+        }
         .sheet(item: $viewerRequest) { request in
             FullScreenPhotoViewer(assets: $assets, startIndex: request.startIndex)
         }
     }
 
     private func syncFromViewModel() {
-        assets = vm.allAssets.map { asset in
+        syncFromAssets(vm.allAssets)
+    }
+
+    private func syncFromAssets(_ source: [PhotoAsset]) {
+        assets = source.map { asset in
             var a = asset
             // Waterfall mode defaults to unselected unless user explicitly toggled.
             a.isSelected = vm.selectionOverrides[asset.id] ?? false
             return a
+        }
+        if cachedItemWidth > 0 {
+            rebuildSectionLayouts(itemWidth: cachedItemWidth)
         }
     }
 
@@ -443,55 +512,104 @@ struct TimelineWaterfallView: View {
         vm.selectionOverrides[assets[index].id] = assets[index].isSelected
     }
 
-    private func waterfallColumns(indices: [Int], itemWidth: CGFloat) -> (left: [Int], right: [Int]) {
-        var left: [Int] = []
-        var right: [Int] = []
-        var leftHeight: CGFloat = 0
-        var rightHeight: CGFloat = 0
+    private func updateLayoutWidthIfNeeded(_ width: CGFloat, force: Bool = false) {
+        let normalized = max(1, width.rounded(.toNearestOrAwayFromZero))
+        let changed = abs(normalized - cachedItemWidth) > 0.5
+        guard force || changed else { return }
+        cachedItemWidth = normalized
+        rebuildSectionLayouts(itemWidth: normalized)
+    }
 
-        for idx in indices {
-            let cardHeight = estimatedCardHeight(for: assets[idx], itemWidth: itemWidth)
-            if leftHeight <= rightHeight {
-                left.append(idx)
-                leftHeight += cardHeight
-            } else {
-                right.append(idx)
-                rightHeight += cardHeight
+    private func rebuildSectionLayouts(itemWidth: CGFloat) {
+        guard itemWidth > 0 else { return }
+        let snapshot = assets
+        layoutRebuildTask?.cancel()
+        layoutRebuildTask = Task(priority: .utility) {
+            let layouts = await Task.detached(priority: .utility) {
+                Self.buildSectionLayouts(from: snapshot, itemWidth: itemWidth)
+            }.value
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                self.sectionLayouts = layouts
             }
         }
-        return (left, right)
     }
 
-    private func estimatedCardHeight(for asset: PhotoAsset, itemWidth: CGFloat) -> CGFloat {
-        let w = CGFloat(max(1, asset.asset.pixelWidth))
-        let h = CGFloat(max(1, asset.asset.pixelHeight))
-        return itemWidth * (h / w) + 52
-    }
-
-    private func monthSections(from assets: [PhotoAsset]) -> [WaterfallMonthSection] {
-        let cal = Calendar.current
-        let grouped = Dictionary(grouping: assets) { asset in
-            let c = cal.dateComponents([.year, .month], from: asset.creationDate)
-            return "\(c.year ?? 0)-\(c.month ?? 0)"
+    private func markScrollInteracting() {
+        if !isScrollInteracting {
+            isScrollInteracting = true
         }
+        scrollIdleTask?.cancel()
+    }
 
-        return grouped.compactMap { key, groupAssets in
-            guard let first = groupAssets.first else { return nil }
-            let c = cal.dateComponents([.year, .month], from: first.creationDate)
+    private func scheduleScrollIdleFlush() {
+        scrollIdleTask?.cancel()
+        scrollIdleTask = Task { @MainActor [pendingAssetsSnapshot] in
+            try? await Task.sleep(nanoseconds: 450_000_000)
+            guard !Task.isCancelled else { return }
+            self.isScrollInteracting = false
+            if let latest = pendingAssetsSnapshot {
+                self.pendingAssetsSnapshot = nil
+                self.syncFromAssets(latest)
+            }
+        }
+    }
+
+    nonisolated private static func buildSectionLayouts(from assets: [PhotoAsset], itemWidth: CGFloat) -> [WaterfallSectionLayout] {
+        guard !assets.isEmpty else { return [] }
+        let cal = Calendar.current
+        var grouped: [String: (year: Int, month: Int, indices: [Int], totalBytes: Int64)] = [:]
+
+        for (idx, asset) in assets.enumerated() {
+            let c = cal.dateComponents([.year, .month], from: asset.creationDate)
             let year = c.year ?? 0
             let month = c.month ?? 0
-            let sortedAssets = groupAssets.sorted { $0.creationDate > $1.creationDate }
-            return WaterfallMonthSection(
-                id: key,
-                year: year,
-                month: month,
-                assets: sortedAssets
+            let key = "\(year)-\(month)"
+            if grouped[key] == nil {
+                grouped[key] = (year: year, month: month, indices: [], totalBytes: 0)
+            }
+            grouped[key]?.indices.append(idx)
+            grouped[key]?.totalBytes += asset.sizeBytes
+        }
+
+        return grouped.values.map { bucket in
+            let sortedIndices = bucket.indices.sorted { assets[$0].creationDate > assets[$1].creationDate }
+            var left: [Int] = []
+            var right: [Int] = []
+            var leftHeight: CGFloat = 0
+            var rightHeight: CGFloat = 0
+
+            for idx in sortedIndices {
+                let cardHeight = estimatedCardHeight(for: assets[idx], itemWidth: itemWidth)
+                if leftHeight <= rightHeight {
+                    left.append(idx)
+                    leftHeight += cardHeight
+                } else {
+                    right.append(idx)
+                    rightHeight += cardHeight
+                }
+            }
+
+            return WaterfallSectionLayout(
+                id: "\(bucket.year)-\(bucket.month)",
+                year: bucket.year,
+                month: bucket.month,
+                title: L10n.yearMonth(bucket.year, bucket.month),
+                totalBytes: bucket.totalBytes,
+                left: left,
+                right: right
             )
         }
         .sorted { lhs, rhs in
             if lhs.year != rhs.year { return lhs.year > rhs.year }
             return lhs.month > rhs.month
         }
+    }
+
+    nonisolated private static func estimatedCardHeight(for asset: PhotoAsset, itemWidth: CGFloat) -> CGFloat {
+        let w = CGFloat(max(1, asset.asset.pixelWidth))
+        let h = CGFloat(max(1, asset.asset.pixelHeight))
+        return itemWidth * (h / w) + 52
     }
 }
 
@@ -593,15 +711,19 @@ private struct TimelineWaterfallCell: View {
         return String(format: "%d:%02d", m, s)
     }
 
-    private func captureTime(_ asset: PHAsset) -> String {
-        guard let date = asset.creationDate else { return "未知时间" }
+    private static let captureTimeFormatter: DateFormatter = {
         let df = DateFormatter()
         df.dateFormat = "MM-dd HH:mm"
-        return df.string(from: date)
+        return df
+    }()
+
+    private func captureTime(_ asset: PHAsset) -> String {
+        guard let date = asset.creationDate else { return L10n.unknownTime }
+        return Self.captureTimeFormatter.string(from: date)
     }
 
     private func locationText(_ asset: PHAsset) -> String {
-        guard let loc = asset.location else { return "未知地点" }
+        guard let loc = asset.location else { return L10n.unknownPlace }
         let lat = String(format: "%.2f", loc.coordinate.latitude)
         let lon = String(format: "%.2f", loc.coordinate.longitude)
         return "\(lat), \(lon)"
@@ -681,22 +803,14 @@ private struct TimelineWaterfallCell: View {
     }
 }
 
-private struct WaterfallMonthSection: Identifiable {
+private struct WaterfallSectionLayout: Identifiable {
     let id: String
     let year: Int
     let month: Int
-    let assets: [PhotoAsset]
-
-    var title: String { "\(year)年\(month)月" }
-    var totalBytes: Int64 { assets.reduce(0) { $0 + $1.sizeBytes } }
-}
-
-private struct TimelineYearHeaderOffsetKey: PreferenceKey {
-    static var defaultValue: [Int: CGFloat] = [:]
-
-    static func reduce(value: inout [Int: CGFloat], nextValue: () -> [Int: CGFloat]) {
-        value.merge(nextValue(), uniquingKeysWith: { _, new in new })
-    }
+    let title: String
+    let totalBytes: Int64
+    let left: [Int]
+    let right: [Int]
 }
 
 // MARK: - Calendar container (vertical scroll, Apple Calendar style)
@@ -743,7 +857,7 @@ struct CalendarContainerView: View {
                         }
                     } header: {
                         HStack(spacing: 0) {
-                            ForEach(["日","一","二","三","四","五","六"], id: \.self) { d in
+                            ForEach(L10n.weekdays, id: \.self) { d in
                                 Text(d)
                                     .font(.system(size: 11, weight: .semibold))
                                     .foregroundColor(AppColors.textTertiary)
@@ -784,10 +898,7 @@ struct CalendarMonthBlock: View {
     private var monthN: Int { calendar.component(.month, from: month) }
 
     private var monthLabel: String {
-        let df = DateFormatter()
-        df.locale = Locale(identifier: "zh_CN")
-        df.dateFormat = "M月"
-        return df.string(from: month)
+        L10n.monthLabel(monthN)
     }
 
     private var firstWeekday: Int {
@@ -890,7 +1001,7 @@ struct DayCellView: View {
                 .clipShape(Circle())
 
             if let info = info {
-                Text("\(info.count)张")
+                Text(L10n.dayCount(info.count))
                     .font(.system(size: 7)).foregroundColor(subTextColor).lineLimit(1)
                 Text(info.formattedSize)
                     .font(.system(size: 7)).foregroundColor(subTextColor).lineLimit(1)
@@ -946,18 +1057,18 @@ struct AlbumFolderDetailView: View {
     var body: some View {
         ZStack(alignment: .bottom) {
             if done {
-                DoneView(count: selected.count, label: "张照片") { dismiss() }
+                DoneView(count: selected.count, label: L10n.photosUnit) { dismiss() }
             } else {
                 VStack(spacing: 0) {
                     SubScreenHeader(
                         title: folder.title,
-                        subtitle: "\(assets.count)张 · \(folder.formattedSize)",
+                        subtitle: L10n.folderInfo(assets.count, folder.formattedSize),
                         onBack: { dismiss() },
                         trailing: AnyView(detailHeaderTrailing)
                     )
 
                     if selectionMode {
-                        Text("低于 \(AppConfig.deleteThreshold) 分的照片已默认标记，点击可切换")
+                        Text(L10n.belowThreshold(AppConfig.deleteThreshold))
                             .font(.caption).foregroundColor(AppColors.textSecondary)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.horizontal).padding(.top, 8)
@@ -1048,16 +1159,16 @@ struct AlbumFolderDetailView: View {
     private var detailHeaderTrailing: some View {
         HStack(spacing: 12) {
             if selectionMode {
-                Button("全选") {
+                Button(L10n.selectAll) {
                     for i in assets.indices { assets[i].isSelected = true; vm.selectionOverrides[assets[i].id] = true }
                 }
                 .foregroundColor(AppColors.purple).font(.subheadline)
-                Button("清空") {
+                Button(L10n.clearAll) {
                     for i in assets.indices { assets[i].isSelected = false; vm.selectionOverrides[assets[i].id] = false }
                 }
                 .foregroundColor(AppColors.textSecondary).font(.subheadline)
             }
-            Button(selectionMode ? "完成" : "选择") { selectionMode.toggle() }
+            Button(selectionMode ? L10n.done : L10n.select) { selectionMode.toggle() }
                 .foregroundColor(selectionMode ? AppColors.green : AppColors.purple)
                 .font(.subheadline.weight(.semibold))
         }
@@ -1103,25 +1214,24 @@ struct DayPhotoDetailView: View {
 
     private var selected: [PhotoAsset] { assets.filter { $0.isSelected } }
     private var dateTitle: String {
-        let months = ["1月","2月","3月","4月","5月","6月","7月","8月","9月","10月","11月","12月"]
-        return "\(dayInfo.year)年\(months[dayInfo.month]) \(dayInfo.day)日"
+        L10n.dayFormat(dayInfo.year, dayInfo.month, dayInfo.day)
     }
 
     var body: some View {
         ZStack(alignment: .bottom) {
             if done {
-                DoneView(count: selected.count, label: "张照片") { dismiss() }
+                DoneView(count: selected.count, label: L10n.photosUnit) { dismiss() }
             } else {
                 VStack(spacing: 0) {
                     SubScreenHeader(
                         title: dateTitle,
-                        subtitle: "\(dayInfo.count)张 · \(dayInfo.formattedSize) · 均分\(dayInfo.averageScore)",
+                        subtitle: L10n.dayDetailSubtitle(dayInfo.count, dayInfo.formattedSize, dayInfo.averageScore),
                         onBack: { dismiss() },
                         trailing: AnyView(detailHeaderTrailing)
                     )
 
                     if selectionMode {
-                        Text("低于 \(AppConfig.deleteThreshold) 分的照片已默认标记，点击可切换")
+                        Text(L10n.belowThreshold(AppConfig.deleteThreshold))
                             .font(.caption).foregroundColor(AppColors.textSecondary)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.horizontal).padding(.top, 8)
@@ -1212,16 +1322,16 @@ struct DayPhotoDetailView: View {
     private var detailHeaderTrailing: some View {
         HStack(spacing: 12) {
             if selectionMode {
-                Button("全选") {
+                Button(L10n.selectAll) {
                     for i in assets.indices { assets[i].isSelected = true; vm.selectionOverrides[assets[i].id] = true }
                 }
                 .foregroundColor(AppColors.purple).font(.subheadline)
-                Button("清空") {
+                Button(L10n.clearAll) {
                     for i in assets.indices { assets[i].isSelected = false; vm.selectionOverrides[assets[i].id] = false }
                 }
                 .foregroundColor(AppColors.textSecondary).font(.subheadline)
             }
-            Button(selectionMode ? "完成" : "选择") { selectionMode.toggle() }
+            Button(selectionMode ? L10n.done : L10n.select) { selectionMode.toggle() }
                 .foregroundColor(selectionMode ? AppColors.green : AppColors.purple)
                 .font(.subheadline.weight(.semibold))
         }
@@ -1282,7 +1392,7 @@ struct FullScreenPhotoViewer: View {
 
                 Spacer()
 
-                Button(selectionMode ? "完成" : "选择") {
+                Button(selectionMode ? L10n.done : L10n.select) {
                     selectionMode.toggle()
                 }
                 .font(.system(size: 14, weight: .semibold))
@@ -1310,7 +1420,7 @@ struct FullScreenPhotoViewer: View {
                     } label: {
                         HStack(spacing: 8) {
                             SelectionStatusBadge(isSelected: isSelected, size: 22)
-                            Text(isSelected ? "已标记删除 · 再次点击取消" : "标记删除")
+                            Text(isSelected ? L10n.markedDeleteToggle : L10n.markDelete)
                                 .font(.system(size: 14, weight: .semibold))
                         }
                         .foregroundColor(.white)
@@ -1414,17 +1524,17 @@ struct FullResAssetView: View {
 
 private struct FullScreenAssetInfoBar: View {
     let asset: PHAsset
-    @State private var locationText: String = "定位中…"
+    @State private var locationText: String = L10n.locating
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 10) {
-                infoText("大小 \(assetFileSizeText(asset))")
-                infoText("格式 \(assetFormat(asset))")
+                infoText("\(L10n.infoSize) \(assetFileSizeText(asset))")
+                infoText("\(L10n.infoFormat) \(assetFormat(asset))")
             }
             HStack(spacing: 10) {
-                infoText("时间 \(captureTimeText(asset))")
-                infoText("地点 \(locationText)")
+                infoText("\(L10n.infoTime) \(captureTimeText(asset))")
+                infoText("\(L10n.infoLocation) \(locationText)")
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1444,15 +1554,15 @@ private struct FullScreenAssetInfoBar: View {
 
     private func resolveLocation() async {
         guard let loc = asset.location else {
-            locationText = "无位置信息"
+            locationText = L10n.noLocation
             return
         }
         let geocoder = CLGeocoder()
         if let marks = try? await geocoder.reverseGeocodeLocation(loc), let p = marks.first {
             let parts = [p.locality ?? p.administrativeArea, p.country].compactMap { $0 }
-            locationText = parts.isEmpty ? "位置未知" : parts.joined(separator: ", ")
+            locationText = parts.isEmpty ? L10n.unknownLocation : parts.joined(separator: ", ")
         } else {
-            locationText = "位置未知"
+            locationText = L10n.unknownLocation
         }
     }
 }
@@ -1482,13 +1592,13 @@ private func assetFormat(_ asset: PHAsset) -> String {
         "public.mpeg-4-video": "MP4",
     ]
     if let v = map[uti] { return v }
-    return uti.components(separatedBy: ".").last?.uppercased() ?? "未知"
+    return uti.components(separatedBy: ".").last?.uppercased() ?? L10n.unknown
 }
 
 private func captureTimeText(_ asset: PHAsset) -> String {
-    guard let date = asset.creationDate else { return "未知时间" }
+    guard let date = asset.creationDate else { return L10n.unknownTime }
     let df = DateFormatter()
-    df.locale = Locale(identifier: "zh_CN")
+    df.locale = Locale(identifier: L10n.dateLocaleIdentifier)
     df.dateFormat = "yyyy-MM-dd HH:mm:ss"
     return df.string(from: date)
 }

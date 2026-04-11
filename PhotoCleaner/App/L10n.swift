@@ -31,6 +31,7 @@ enum L10n {
     static var select: String { isEn ? "Select" : "选择" }
     static var clearAll: String { isEn ? "Clear" : "清空" }
     static var deleteSelected: String { isEn ? "Delete Selected" : "删除所选" }
+    static var photosUnit: String { isEn ? "photos" : "张照片" }
     static var processing: String { isEn ? "Processing…" : "处理中…" }
     static var loading: String { isEn ? "Loading…" : "加载中…" }
     static var photo: String { isEn ? "Photo" : "照片" }
@@ -307,6 +308,8 @@ enum L10n {
     static var duplicate: String { isEn ? "Duplicate" : "重复" }
     static var similar: String { isEn ? "Similar" : "相似" }
     static var merge: String { isEn ? "Merge" : "合并" }
+    static var cancelMerge: String { isEn ? "Cancel Merge" : "取消合并" }
+    static var cancelMergeHint: String { isEn ? "Swipe left on a group card to cancel merge. Photos won't be deleted and will move to \"Other Behavior\"." : "左滑整组卡片可取消合并，不删除，并转入“其他使用行为”" }
     static var best: String { isEn ? "Best" : "最佳" }
     static func screenshotsDone(_ n: Int) -> String { isEn ? "\(n) screenshots" : "\(n)张截图" }
     static var screenshotTitle: String { isEn ? "Screenshot Cleanup" : "截图清理" }
@@ -395,4 +398,48 @@ enum L10n {
 
     // MARK: Locale
     static var dateLocaleIdentifier: String { isEn ? "en_US" : "zh_CN" }
+
+    // MARK: Onboarding
+    static var onboardingNext: String { isEn ? "Next" : "下一步" }
+    static var onboardingSkip: String { isEn ? "Skip" : "跳过" }
+    static var onboardingStart: String { isEn ? "Get Started" : "开始使用" }
+
+    static var onboardingFeature1Title: String { isEn ? "Free Up Space Instantly" : "一键释放存储空间" }
+    static var onboardingFeature1Desc: String {
+        isEn ? "Browse videos by size in a waterfall layout. Quickly find and delete large files eating up your storage."
+             : "瀑布流浏览视频文件，快速定位并删除占用空间最大的视频，立即释放宝贵存储。"
+    }
+
+    static var onboardingFeature2Title: String { isEn ? "Smart Photo Analysis" : "智能照片分析" }
+    static var onboardingFeature2Desc: String {
+        isEn ? "Auto-classify screenshots by content, and score every photo's quality with AI — blurry, dark, or duplicate photos get flagged."
+             : "自动将截图按内容分类整理，AI 为每张照片智能打分——模糊、过暗、重复照片一目了然。"
+    }
+
+    static var onboardingScreenshotLabel: String { isEn ? "Screenshots" : "截图分类" }
+    static var onboardingScoreLabel: String { isEn ? "Quality Score" : "质量评分" }
+    static var onboardingTagChat: String { isEn ? "Chat" : "聊天" }
+    static var onboardingTagOrder: String { isEn ? "Order" : "订单" }
+    static var onboardingTagCode: String { isEn ? "Code" : "代码" }
+    static var onboardingTagOther: String { isEn ? "Other" : "其他" }
+
+    static var onboardingNotifTitle: String { isEn ? "Stay in the Loop" : "开启通知" }
+    static var onboardingNotifDesc: String {
+        isEn ? "Get notified when cleanup scans finish and receive smart suggestions to keep your library tidy."
+             : "扫描完成时及时提醒，定期推送清理建议，让相册始终保持整洁。"
+    }
+    static var onboardingNotifAction: String { isEn ? "Enable Notifications" : "开启通知" }
+    static var onboardingNotifDone: String { isEn ? "Notifications Enabled" : "通知已开启" }
+
+    static var onboardingPhotoTitle: String { isEn ? "Access Your Photos" : "访问您的相册" }
+    static var onboardingPhotoDesc: String {
+        isEn ? "PhotoCleaner needs access to your photo library to analyze and clean up. All processing is done on-device — nothing is uploaded."
+             : "PhotoCleaner 需要访问您的相册进行分析清理。所有处理均在本地完成，不会上传任何数据。"
+    }
+    static var onboardingPhotoAction: String { isEn ? "Allow Photo Access" : "允许访问相册" }
+    static var onboardingPhotoDone: String { isEn ? "Access Granted" : "已获得授权" }
+    static var onboardingPhotoDeniedHint: String {
+        isEn ? "Please go to Settings → PhotoCleaner to grant photo access."
+             : "请前往 系统设置 → PhotoCleaner 开启相册访问权限。"
+    }
 }

@@ -20,7 +20,7 @@ func rowCheck(_ on: Bool, _ color: Color = AppColors.selectionBlue) -> some View
 
 // MARK: - Helper: asset filename via PHAssetResource
 func assetFilename(_ asset: PHAsset) -> String {
-    PHAssetResource.assetResources(for: asset).first?.originalFilename ?? "照片"
+    PHAssetResource.assetResources(for: asset).first?.originalFilename ?? L10n.photo
 }
 
 // MARK: - Helper: estimated size string
