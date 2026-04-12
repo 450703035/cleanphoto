@@ -41,7 +41,7 @@ struct ToolsView: View {
                     .padding(.horizontal).padding(.top, 16).padding(.bottom, 16)
 
                     LazyVGrid(columns: cols, spacing: 12) {
-                        ForEach(items, id: \.name) { t in
+                        ForEach(items, id: \.route) { t in
                             ToolCard(
                                 icon: t.icon,
                                 name: t.name,
@@ -114,5 +114,7 @@ struct ToolCard: View {
                 )
             )
         }
+        .buttonStyle(.plain)
+        .contentShape(RoundedRectangle(cornerRadius: AppShape.cardRadius))
     }
 }

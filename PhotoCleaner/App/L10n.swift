@@ -34,6 +34,7 @@ enum L10n {
     static var photosUnit: String { isEn ? "photos" : "张照片" }
     static var processing: String { isEn ? "Processing…" : "处理中…" }
     static var loading: String { isEn ? "Loading…" : "加载中…" }
+    static var photoPermissionRequired: String { isEn ? "Photo access is required" : "需要相册权限" }
     static var photo: String { isEn ? "Photo" : "照片" }
     static var unknown: String { isEn ? "Unknown" : "未知" }
 

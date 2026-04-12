@@ -71,6 +71,15 @@ final class DatabaseService: @unchecked Sendable {
                 deleted_at       INTEGER
             );
             CREATE INDEX IF NOT EXISTS idx_asset_scan_deleted ON asset_scan_state(is_deleted);
+            CREATE TABLE IF NOT EXISTS asset_metadata (
+                local_id         TEXT PRIMARY KEY,
+                file_size_bytes  INTEGER,
+                pixel_width      INTEGER NOT NULL,
+                pixel_height     INTEGER NOT NULL,
+                creation_ts      INTEGER,
+                updated_at       INTEGER NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_asset_metadata_updated ON asset_metadata(updated_at);
         """, nil, nil, nil)
 
         // Safe migrations: only add missing columns (prevents duplicate-column errors on relaunch).
@@ -212,6 +221,111 @@ final class DatabaseService: @unchecked Sendable {
     struct FileSizeEntry: Sendable {
         let localId: String
         let fileSizeBytes: Int64
+    }
+
+    struct AssetMetadataEntry: Sendable {
+        let localId: String
+        let fileSizeBytes: Int64?
+        let pixelWidth: Int32
+        let pixelHeight: Int32
+        let creationTimestamp: Int64?
+    }
+
+    struct CachedAssetMetadata: Sendable {
+        let fileSizeBytes: Int64?
+        let pixelWidth: Int32
+        let pixelHeight: Int32
+        let creationTimestamp: Int64?
+    }
+
+    func loadMetadata(for ids: [String]) async -> [String: CachedAssetMetadata] {
+        await run { self._loadMetadata(for: ids) }
+    }
+
+    private func _loadMetadata(for ids: [String]) -> [String: CachedAssetMetadata] {
+        guard !ids.isEmpty else { return [:] }
+        var output: [String: CachedAssetMetadata] = [:]
+        let chunkSize = 500
+        var offset = 0
+        while offset < ids.count {
+            let chunk = Array(ids[offset..<min(offset + chunkSize, ids.count)])
+            let placeholders = chunk.map { _ in "?" }.joined(separator: ",")
+            let sql = """
+                SELECT local_id, file_size_bytes, pixel_width, pixel_height, creation_ts
+                FROM asset_metadata
+                WHERE local_id IN (\(placeholders))
+            """
+            var stmt: OpaquePointer?
+            if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
+                for (i, id) in chunk.enumerated() {
+                    sqlite3_bind_text(stmt, Int32(i + 1), id, -1, SQLITE_TRANSIENT)
+                }
+                while sqlite3_step(stmt) == SQLITE_ROW {
+                    let localId = String(cString: sqlite3_column_text(stmt, 0))
+                    output[localId] = CachedAssetMetadata(
+                        fileSizeBytes: sqlite3_column_type(stmt, 1) == SQLITE_NULL ? nil : sqlite3_column_int64(stmt, 1),
+                        pixelWidth: Int32(sqlite3_column_int(stmt, 2)),
+                        pixelHeight: Int32(sqlite3_column_int(stmt, 3)),
+                        creationTimestamp: sqlite3_column_type(stmt, 4) == SQLITE_NULL ? nil : sqlite3_column_int64(stmt, 4)
+                    )
+                }
+                sqlite3_finalize(stmt)
+            }
+            offset += chunkSize
+        }
+        return output
+    }
+
+    func upsertAssetMetadata(_ entries: [AssetMetadataEntry]) async {
+        await run { self._upsertAssetMetadata(entries) }
+    }
+
+    private func _upsertAssetMetadata(_ entries: [AssetMetadataEntry]) {
+        guard !entries.isEmpty else { return }
+        let sql = """
+            INSERT INTO asset_metadata
+                (local_id, file_size_bytes, pixel_width, pixel_height, creation_ts, updated_at)
+            VALUES (?,?,?,?,?,?)
+            ON CONFLICT(local_id) DO UPDATE SET
+                file_size_bytes = excluded.file_size_bytes,
+                pixel_width = excluded.pixel_width,
+                pixel_height = excluded.pixel_height,
+                creation_ts = excluded.creation_ts,
+                updated_at = excluded.updated_at
+        """
+        _ = withTransaction("upsertAssetMetadata") {
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+                logSQLiteError("prepare upsertAssetMetadata")
+                return false
+            }
+            defer { sqlite3_finalize(stmt) }
+
+            let now = Int64(Date().timeIntervalSince1970)
+            for entry in entries {
+                sqlite3_bind_text(stmt, 1, entry.localId, -1, SQLITE_TRANSIENT)
+                if let size = entry.fileSizeBytes {
+                    sqlite3_bind_int64(stmt, 2, size)
+                } else {
+                    sqlite3_bind_null(stmt, 2)
+                }
+                sqlite3_bind_int(stmt, 3, entry.pixelWidth)
+                sqlite3_bind_int(stmt, 4, entry.pixelHeight)
+                if let ts = entry.creationTimestamp {
+                    sqlite3_bind_int64(stmt, 5, ts)
+                } else {
+                    sqlite3_bind_null(stmt, 5)
+                }
+                sqlite3_bind_int64(stmt, 6, now)
+                guard sqlite3_step(stmt) == SQLITE_DONE else {
+                    logSQLiteError("step upsertAssetMetadata")
+                    return false
+                }
+                sqlite3_reset(stmt)
+                sqlite3_clear_bindings(stmt)
+            }
+            return true
+        }
     }
 
     func saveFileSizes(_ entries: [FileSizeEntry]) async {
@@ -455,6 +569,10 @@ final class DatabaseService: @unchecked Sendable {
         await run { self._loadActiveScannedIds(for: ids) }
     }
 
+    func loadAllActiveScannedIds() async -> Set<String> {
+        await run { self._loadAllActiveScannedIds() }
+    }
+
     private func _loadActiveScannedIds(for ids: [String]) -> Set<String> {
         guard !ids.isEmpty else { return [] }
         let chunkSize = 500
@@ -479,6 +597,18 @@ final class DatabaseService: @unchecked Sendable {
                 sqlite3_finalize(stmt)
             }
             offset += chunkSize
+        }
+        return result
+    }
+
+    private func _loadAllActiveScannedIds() -> Set<String> {
+        var result = Set<String>()
+        var stmt: OpaquePointer?
+        let sql = "SELECT local_id FROM asset_scan_state WHERE is_deleted = 0"
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+        defer { sqlite3_finalize(stmt) }
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            result.insert(String(cString: sqlite3_column_text(stmt, 0)))
         }
         return result
     }
@@ -628,6 +758,42 @@ final class DatabaseService: @unchecked Sendable {
         }
         sqlite3_finalize(stmt)
         _removeScores(for: stale)   // already on queue — call private sync version directly
+    }
+
+    func pruneStaleMetadata(keepIds: Set<String>) async {
+        await run { self._pruneStaleMetadata(keepIds: keepIds) }
+    }
+
+    private func _pruneStaleMetadata(keepIds: Set<String>) {
+        let sql = "SELECT local_id FROM asset_metadata"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return }
+        var stale: [String] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let id = String(cString: sqlite3_column_text(stmt, 0))
+            if !keepIds.contains(id) { stale.append(id) }
+        }
+        sqlite3_finalize(stmt)
+        guard !stale.isEmpty else { return }
+        _ = withTransaction("pruneStaleMetadata") {
+            var delStmt: OpaquePointer?
+            let delSQL = "DELETE FROM asset_metadata WHERE local_id=?"
+            guard sqlite3_prepare_v2(db, delSQL, -1, &delStmt, nil) == SQLITE_OK else {
+                logSQLiteError("prepare pruneStaleMetadata")
+                return false
+            }
+            defer { sqlite3_finalize(delStmt) }
+            for id in stale {
+                sqlite3_bind_text(delStmt, 1, id, -1, SQLITE_TRANSIENT)
+                guard sqlite3_step(delStmt) == SQLITE_DONE else {
+                    logSQLiteError("step pruneStaleMetadata")
+                    return false
+                }
+                sqlite3_reset(delStmt)
+                sqlite3_clear_bindings(delStmt)
+            }
+            return true
+        }
     }
 
     // MARK: - Helpers

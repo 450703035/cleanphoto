@@ -50,6 +50,7 @@ class PhotoLibraryService: ObservableObject {
             if upper <= 0 { return result }
 
             for i in 0..<upper where result[i].fileSizeBytes == nil {
+                if Task.isCancelled { break }
                 if let size = self.assetFileSize(result[i].asset), size > 0 {
                     result[i].fileSizeBytes = size
                 }

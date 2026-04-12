@@ -12,16 +12,16 @@ struct TimelineView: View {
     @State private var selectedFolder: AlbumFolder? = nil
     @State private var selectedDay: DayInfo? = nil
     @State private var calendarYear: Int = Calendar.current.component(.year, from: Date())
+    @State private var isListNearTail = false
 
     enum TimelineMode { case list, calendar, waterfall }
 
-    private var shouldShowScoringBar: Bool {
-        vm.isLoading || (vm.scoringProgress < 1.0)
+    private var showNotScannedState: Bool {
+        scanVM.phase == .idle
     }
 
-    private var displayProgress: Double {
-        if vm.isLoading && vm.scoringProgress >= 1.0 { return 0.99 }
-        return min(max(vm.scoringProgress, 0), 1.0)
+    private var showScanningProgressOnly: Bool {
+        scanVM.phase == .scanning && !scanVM.timelineCanShowAssets
     }
 
     private var shouldShowGridPlaceholder: Bool {
@@ -38,99 +38,7 @@ struct TimelineView: View {
         NavigationStack {
             ZStack {
                 AppColors.darkBG.ignoresSafeArea()
-                VStack(spacing: 0) {
-                    // ── Main header ──────────────────────────────────────
-                    HStack {
-                        Text(L10n.timeline)
-                            .font(AppTypography.sectionTitle).foregroundColor(AppColors.textPrimary)
-                        Spacer()
-                        Picker("", selection: $viewMode) {
-                            Text(L10n.listMode).tag(TimelineMode.list)
-                            Text(L10n.calendarMode).tag(TimelineMode.calendar)
-                            Text(L10n.waterfallMode).tag(TimelineMode.waterfall)
-                        }
-                        .pickerStyle(.segmented)
-                        .frame(width: 190)
-                    }
-                    .padding(.horizontal)
-                    .padding(.top, 16)
-                    .padding(.bottom, 8)
-
-                    // ── Calendar sub-header: year + legend ───────────────
-                    if viewMode == .calendar {
-                        HStack(alignment: .center, spacing: 0) {
-                            Text(L10n.yearLabel(calendarYear))
-                                .font(.system(size: 17, weight: .semibold))
-                                .foregroundColor(AppColors.lightPurple)
-                            Text(vm.yearSize(calendarYear).formattedFileSize)
-                                .font(.system(size: 12))
-                                .foregroundColor(AppColors.textSecondary)
-                                .padding(.leading, 6)
-                            Spacer()
-                            // Compact inline legend
-                            HStack(spacing: 8) {
-                                ForEach([
-                                    (Color(hex: "D3F9D8"), L10n.legendFew),
-                                    (Color(hex: "69DB7C"), L10n.legendMedium),
-                                    (Color(hex: "FFD43B"), L10n.legendMany),
-                                    (Color(hex: "FF6B6B"), L10n.legendFull)
-                                ], id: \.1) { color, label in
-                                    HStack(spacing: 2) {
-                                        RoundedRectangle(cornerRadius: 2)
-                                            .fill(color).frame(width: 10, height: 10)
-                                        Text(label)
-                                            .font(.system(size: 9))
-                                            .foregroundColor(AppColors.textSecondary)
-                                    }
-                                }
-                                Divider().frame(height: 10).background(AppColors.textTertiary)
-                                ForEach([
-                                    (AppColors.red, "<40"),
-                                    (AppColors.amber, "40-70"),
-                                    (AppColors.green, ">70")
-                                ], id: \.1) { color, label in
-                                    HStack(spacing: 2) {
-                                        Circle().fill(color).frame(width: 6, height: 6)
-                                        Text(label)
-                                            .font(.system(size: 9))
-                                            .foregroundColor(AppColors.textSecondary)
-                                    }
-                                }
-                            }
-                        }
-                        .padding(.horizontal)
-                        .padding(.bottom, 6)
-                        .transition(.opacity)
-                    }
-
-                    // ── Scoring progress bar ─────────────────────────────
-                    if shouldShowScoringBar {
-                        VStack(spacing: 3) {
-                            ProgressView(value: displayProgress)
-                                .tint(AppColors.lightPurple)
-                                .padding(.horizontal)
-                            Text(vm.isLoading && vm.scoringProgress >= 1.0
-                                 ? L10n.processing
-                                 : L10n.scoringPhotos(Int(displayProgress * 100)))
-                                .font(.system(size: 10))
-                                .foregroundColor(AppColors.textSecondary)
-                        }
-                        .padding(.bottom, 6)
-                    }
-
-                    if shouldShowGridPlaceholder {
-                        Spacer()
-                        TimelineLoadingPlaceholder(mode: viewMode)
-                        Spacer()
-                    } else if viewMode == .list {
-                        TimelineListView(vm: vm, onFolderTap: { selectedFolder = $0 })
-                    } else if viewMode == .calendar {
-                        CalendarContainerView(vm: vm, onDayTap: { selectedDay = $0 },
-                                             visibleYear: $calendarYear)
-                    } else {
-                        TimelineWaterfallView(vm: vm)
-                    }
-                }
+                timelineBody
             }
             .navigationBarHidden(true)
             .sheet(item: $selectedFolder) { folder in
@@ -139,9 +47,16 @@ struct TimelineView: View {
             .sheet(item: $selectedDay) { day in
                 DayPhotoDetailView(dayInfo: day, selectionOverrides: vm.selectionOverrides)
             }
-            .task {
-                try? await Task.sleep(nanoseconds: 150_000_000)
-                await vm.load()
+            .task { await syncTimelineFromScanState() }
+            .onReceive(scanVM.$timelineVisibleAssets) { _ in
+                Task { await syncTimelineFromScanState() }
+            }
+            .onReceive(scanVM.$phase) { _ in
+                Task { await syncTimelineFromScanState() }
+            }
+            .onChange(of: isListNearTail) { _ in
+                guard scanVM.phase == .scanning else { return }
+                Task { await syncTimelineFromScanState() }
             }
             .onAppear {
                 vm.setTimelineInteractionActive(true)
@@ -152,6 +67,133 @@ struct TimelineView: View {
                 scanVM.setDetailInteraction(false)
             }
         }
+    }
+
+    @ViewBuilder
+    private var timelineBody: some View {
+        if showNotScannedState {
+            TimelineNotScannedView {
+                scanVM.startScan()
+            }
+        } else if showScanningProgressOnly {
+            TimelineScanningProgressView(
+                progress: scanVM.progress,
+                analyzedCount: scanVM.analyzedCount,
+                elapsedText: scanVM.scanElapsedText
+            )
+        } else {
+            VStack(spacing: 0) {
+                HStack {
+                    Text(L10n.timeline)
+                        .font(AppTypography.sectionTitle).foregroundColor(AppColors.textPrimary)
+                    Spacer()
+                    Picker("", selection: $viewMode) {
+                        Text(L10n.listMode).tag(TimelineMode.list)
+                        Text(L10n.calendarMode).tag(TimelineMode.calendar)
+                        Text(L10n.waterfallMode).tag(TimelineMode.waterfall)
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(width: 190)
+                }
+                .padding(.horizontal)
+                .padding(.top, 16)
+                .padding(.bottom, 8)
+
+                if scanVM.isBackgroundAnalyzing || scanVM.phase == .scanning {
+                    VStack(spacing: 4) {
+                        ProgressView(value: min(max(scanVM.progress, 0), 1))
+                            .tint(AppColors.lightPurple)
+                            .padding(.horizontal)
+                        Text("时间线整理中 · 已分析 \(scanVM.analyzedCount) 张")
+                            .font(.system(size: 11))
+                            .foregroundColor(AppColors.textSecondary)
+                    }
+                    .padding(.bottom, 6)
+                }
+
+                if viewMode == .calendar {
+                    HStack(alignment: .center, spacing: 0) {
+                        Text(L10n.yearLabel(calendarYear))
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundColor(AppColors.lightPurple)
+                        Text(vm.yearSize(calendarYear).formattedFileSize)
+                            .font(.system(size: 12))
+                            .foregroundColor(AppColors.textSecondary)
+                            .padding(.leading, 6)
+                        Spacer()
+                    }
+                    .padding(.horizontal)
+                    .padding(.bottom, 6)
+                    .transition(.opacity)
+                }
+
+                if shouldShowGridPlaceholder {
+                    Spacer()
+                    TimelineLoadingPlaceholder(mode: viewMode)
+                    Spacer()
+                } else if viewMode == .list {
+                    TimelineListView(
+                        vm: vm,
+                        onFolderTap: { selectedFolder = $0 },
+                        onTailVisibilityChange: { isListNearTail = $0 }
+                    )
+                } else if viewMode == .calendar {
+                    CalendarContainerView(vm: vm, onDayTap: { selectedDay = $0 },
+                                         visibleYear: $calendarYear)
+                } else {
+                    TimelineWaterfallView(vm: vm)
+                }
+            }
+        }
+    }
+
+    private func syncTimelineFromScanState() async {
+        switch scanVM.phase {
+        case .idle:
+            vm.clearTimeline()
+        case .scanning:
+            if scanVM.timelineCanShowAssets {
+                let incoming = scanVM.timelineVisibleAssets
+                guard !incoming.isEmpty else { return }
+
+                // First reveal after the 20s gate.
+                if vm.allAssets.isEmpty && shouldApplySnapshot(incoming) {
+                    await vm.applyScannedSubset(incoming)
+                    return
+                }
+
+                // During scan, only push list updates when user is near the tail and
+                // we actually have new scanned assets; otherwise keep content stable.
+                let hasNewAssets = incoming.count > vm.allAssets.count
+                guard hasNewAssets else { return }
+
+                let shouldApplyIncrementalUpdate: Bool
+                switch viewMode {
+                case .list:
+                    shouldApplyIncrementalUpdate = isListNearTail
+                case .calendar, .waterfall:
+                    shouldApplyIncrementalUpdate = false
+                }
+                if shouldApplyIncrementalUpdate {
+                    await vm.applyScannedSubset(incoming)
+                }
+            } else {
+                vm.clearTimeline()
+            }
+        case .done:
+            let incoming = scanVM.allAssets
+            guard shouldApplySnapshot(incoming) else { return }
+            await vm.applyScannedSubset(incoming)
+        }
+    }
+
+    private func shouldApplySnapshot(_ incoming: [PhotoAsset]) -> Bool {
+        if incoming.count != vm.allAssets.count { return true }
+        guard !incoming.isEmpty else { return !vm.allAssets.isEmpty }
+        guard !vm.allAssets.isEmpty else { return true }
+        if incoming.first?.id != vm.allAssets.first?.id { return true }
+        if incoming.last?.id != vm.allAssets.last?.id { return true }
+        return false
     }
 }
 
@@ -196,12 +238,65 @@ private struct TimelineLoadingPlaceholder: View {
     }
 }
 
+private struct TimelineNotScannedView: View {
+    let onStart: () -> Void
+
+    var body: some View {
+        VStack(spacing: 14) {
+            Spacer()
+            Text("时间线整理")
+                .font(AppTypography.sectionTitle)
+                .foregroundColor(AppColors.textPrimary)
+            Text("尚未扫描，点击开始扫描后生成时间线")
+                .font(.system(size: 13))
+                .foregroundColor(AppColors.textSecondary)
+            Button("开始扫描", action: onStart)
+                .buttonStyle(ApplePrimaryButtonStyle())
+                .padding(.horizontal, 40)
+            Spacer()
+        }
+    }
+}
+
+private struct TimelineScanningProgressView: View {
+    let progress: Double
+    let analyzedCount: Int
+    let elapsedText: String
+
+    var body: some View {
+        VStack(spacing: 12) {
+            Spacer()
+            Text("时间线整理中")
+                .font(AppTypography.sectionTitle)
+                .foregroundColor(AppColors.textPrimary)
+            Text("扫描 20 秒后将开始展示已完成扫描的照片")
+                .font(.system(size: 13))
+                .foregroundColor(AppColors.textSecondary)
+            ProgressView(value: min(max(progress, 0), 1))
+                .tint(AppColors.lightPurple)
+                .padding(.horizontal, 26)
+            Text("已分析 \(analyzedCount) 张 · \(elapsedText)")
+                .font(.system(size: 12))
+                .foregroundColor(AppColors.textSecondary)
+            Spacer()
+        }
+    }
+}
+
 // MARK: - List view
 
 struct TimelineListView: View {
     @ObservedObject var vm: LibraryViewModel
     let onFolderTap: (AlbumFolder) -> Void
+    let onTailVisibilityChange: (Bool) -> Void
     @State private var stickyYear: Int? = nil
+    @State private var orderedFolderKeys: [String] = []
+    @State private var folderAssetsByKey: [String: [PHAsset]] = [:]
+    @State private var visibleFolderKeys: Set<String> = []
+    @State private var preheatedAssetsByID: [String: PHAsset] = [:]
+    @State private var lastReportedNearTail = false
+    private let preheatPaddingFolders = 18
+    private let nearTailThresholdFolders = 1
     private let cols = [
         GridItem(.flexible(), spacing: 4),
         GridItem(.flexible(), spacing: 4),
@@ -249,6 +344,7 @@ struct TimelineListView: View {
                         }
 
                         ForEach(vm.months(for: year), id: \.self) { month in
+                            let monthFolders = vm.yearGroups[year]?[month] ?? []
                             VStack(alignment: .leading, spacing: 6) {
                                 // Month label + size
                                 HStack(spacing: 6) {
@@ -269,11 +365,14 @@ struct TimelineListView: View {
                                 .padding(.top, 10)
 
                                 LazyVGrid(columns: cols, spacing: 4) {
-                                    ForEach(vm.yearGroups[year]?[month] ?? []) { folder in
+                                    ForEach(Array(monthFolders.enumerated()), id: \.element.id) { idx, folder in
+                                        let folderKey = makeFolderKey(year: year, month: month, index: idx, folder: folder)
                                         AlbumFolderCell(
                                             folder: folder,
                                             onTap: { onFolderTap(folder) },
-                                            onLongPress: {}
+                                            onLongPress: {},
+                                            onVisible: { markFolderVisible(folderKey) },
+                                            onHidden: { markFolderHidden(folderKey) }
                                         )
                                     }
                                 }
@@ -313,6 +412,9 @@ struct TimelineListView: View {
             if stickyYear == nil {
                 stickyYear = vm.sortedYears.first
             }
+            lastReportedNearTail = false
+            onTailVisibilityChange(false)
+            rebuildFolderIndex()
         }
         .onChange(of: vm.sortedYears) { years in
             guard let current = stickyYear else {
@@ -322,9 +424,132 @@ struct TimelineListView: View {
             if !years.contains(current) {
                 stickyYear = years.first
             }
+            rebuildFolderIndex()
+        }
+        .onReceive(vm.$yearGroups) { _ in
+            rebuildFolderIndex()
         }
         // Pull-to-refresh → wipe cached scores and rescore everything
         .refreshable { await vm.rescore() }
+        .onDisappear {
+            let assets = Array(preheatedAssetsByID.values)
+            if !assets.isEmpty {
+                let targetSize = preheatTargetSize
+                ThumbnailCacheManager.shared.stopCaching(assets, targetSize: targetSize, contentMode: .aspectFill)
+            }
+            preheatedAssetsByID.removeAll()
+            visibleFolderKeys.removeAll()
+            setNearTail(false)
+        }
+    }
+
+    private var preheatTargetSize: CGSize {
+        let scale = UIScreen.main.scale
+        return CGSize(width: 180 * scale, height: 180 * scale)
+    }
+
+    private func makeFolderKey(year: Int, month: String, index: Int, folder: AlbumFolder) -> String {
+        let headID = folder.assets.first?.id ?? "none"
+        return "\(year)|\(month)|\(index)|\(headID)"
+    }
+
+    private func rebuildFolderIndex() {
+        var keys: [String] = []
+        var mapping: [String: [PHAsset]] = [:]
+        for year in vm.sortedYears {
+            for month in vm.months(for: year) {
+                let folders = vm.yearGroups[year]?[month] ?? []
+                for (idx, folder) in folders.enumerated() {
+                    let key = makeFolderKey(year: year, month: month, index: idx, folder: folder)
+                    keys.append(key)
+                    mapping[key] = Array(folder.assets.prefix(8)).map(\.asset)
+                }
+            }
+        }
+        orderedFolderKeys = keys
+        folderAssetsByKey = mapping
+        visibleFolderKeys = visibleFolderKeys.intersection(Set(keys))
+        updatePreheatWindow()
+    }
+
+    private func markFolderVisible(_ key: String) {
+        guard visibleFolderKeys.insert(key).inserted else { return }
+        updatePreheatWindow()
+    }
+
+    private func markFolderHidden(_ key: String) {
+        guard visibleFolderKeys.remove(key) != nil else { return }
+        updatePreheatWindow()
+    }
+
+    private func updatePreheatWindow() {
+        guard !orderedFolderKeys.isEmpty else {
+            clearAllPreheatedAssets()
+            setNearTail(false)
+            return
+        }
+
+        let indexMap = Dictionary(uniqueKeysWithValues: orderedFolderKeys.enumerated().map { ($1, $0) })
+        let visibleIndices = visibleFolderKeys.compactMap { indexMap[$0] }.sorted()
+        let windowIndices: ClosedRange<Int>
+        if let first = visibleIndices.first, let last = visibleIndices.last {
+            let lower = max(0, first - preheatPaddingFolders)
+            let upper = min(orderedFolderKeys.count - 1, last + preheatPaddingFolders)
+            windowIndices = lower...upper
+        } else {
+            let upper = min(orderedFolderKeys.count - 1, preheatPaddingFolders)
+            windowIndices = 0...upper
+        }
+
+        var desiredByID: [String: PHAsset] = [:]
+        for idx in windowIndices {
+            let key = orderedFolderKeys[idx]
+            let assets = folderAssetsByKey[key] ?? []
+            for asset in assets where desiredByID[asset.localIdentifier] == nil {
+                desiredByID[asset.localIdentifier] = asset
+            }
+        }
+
+        let targetSize = preheatTargetSize
+        let currentIDs = Set(preheatedAssetsByID.keys)
+        let desiredIDs = Set(desiredByID.keys)
+        let startIDs = desiredIDs.subtracting(currentIDs)
+        let stopIDs = currentIDs.subtracting(desiredIDs)
+
+        let startAssets = startIDs.compactMap { desiredByID[$0] }
+        let stopAssets = stopIDs.compactMap { preheatedAssetsByID[$0] }
+        if !startAssets.isEmpty {
+            ThumbnailCacheManager.shared.startCaching(startAssets, targetSize: targetSize, contentMode: .aspectFill)
+        }
+        if !stopAssets.isEmpty {
+            ThumbnailCacheManager.shared.stopCaching(stopAssets, targetSize: targetSize, contentMode: .aspectFill)
+        }
+        preheatedAssetsByID = desiredByID
+        updateNearTailState()
+    }
+
+    private func clearAllPreheatedAssets() {
+        let assets = Array(preheatedAssetsByID.values)
+        guard !assets.isEmpty else { return }
+        ThumbnailCacheManager.shared.stopCaching(assets, targetSize: preheatTargetSize, contentMode: .aspectFill)
+        preheatedAssetsByID.removeAll()
+    }
+
+    private func updateNearTailState() {
+        guard !orderedFolderKeys.isEmpty else {
+            setNearTail(false)
+            return
+        }
+        let indexMap = Dictionary(uniqueKeysWithValues: orderedFolderKeys.enumerated().map { ($1, $0) })
+        let maxVisibleIndex = visibleFolderKeys.compactMap { indexMap[$0] }.max() ?? -1
+        let thresholdIndex = max(0, orderedFolderKeys.count - 1 - nearTailThresholdFolders)
+        setNearTail(maxVisibleIndex >= thresholdIndex)
+    }
+
+    private func setNearTail(_ nearTail: Bool) {
+        guard nearTail != lastReportedNearTail else { return }
+        lastReportedNearTail = nearTail
+        onTailVisibilityChange(nearTail)
     }
 }
 
@@ -353,13 +578,6 @@ struct TimelineWaterfallView: View {
 
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0, pinnedViews: .sectionHeaders) {
-                        Color.clear
-                            .frame(height: 0)
-                            .onAppear { updateLayoutWidthIfNeeded(colWidth, force: true) }
-                            .onChange(of: colWidth) { newWidth in
-                                updateLayoutWidthIfNeeded(newWidth, force: true)
-                            }
-
                         HStack(spacing: 12) {
                             Text(L10n.totalItems(assets.count))
                                 .font(.system(size: 12))
@@ -445,6 +663,12 @@ struct TimelineWaterfallView: View {
                         }
                     }
                     .padding(.bottom, selected.isEmpty ? 20 : 90)
+                }
+                .onAppear {
+                    updateLayoutWidthIfNeeded(colWidth, force: true)
+                }
+                .onChange(of: colWidth) { newWidth in
+                    updateLayoutWidthIfNeeded(newWidth, force: true)
                 }
                 .simultaneousGesture(
                     DragGesture(minimumDistance: 2)
@@ -918,7 +1142,7 @@ struct CalendarMonthBlock: View {
             // Month header
             Text(monthLabel)
                 .font(.system(size: 17, weight: .bold))
-                .foregroundColor(isCurrentMonth ? AppColors.purple : .white)
+                .foregroundColor(isCurrentMonth ? AppColors.purple : AppColors.textPrimary)
                 .padding(.leading, 14)
                 .padding(.top, 14)
                 .padding(.bottom, 4)
@@ -1361,7 +1585,7 @@ struct FullScreenPhotoViewer: View {
 
     var body: some View {
         ZStack {
-            Color.black.ignoresSafeArea()
+            AppColors.darkBG.ignoresSafeArea()
 
             TabView(selection: $currentIndex) {
                 ForEach(assets.indices, id: \.self) { i in
@@ -1472,9 +1696,10 @@ struct FullResAssetView: View {
                             .resizable()
                             .scaledToFit()
                             .frame(width: geo.size.width, height: geo.size.height)
+                            .background(AppColors.darkBG)
                     } else {
-                        Color.black
-                            .overlay(ProgressView().tint(.white.opacity(0.6)))
+                        AppColors.darkBG
+                            .overlay(ProgressView().tint(AppColors.textSecondary))
                             .frame(width: geo.size.width, height: geo.size.height)
                     }
                 }

@@ -5,11 +5,12 @@ import Photos
 // MARK: - Onboarding Container
 struct OnboardingView: View {
     @Binding var hasCompletedOnboarding: Bool
+    @ObservedObject var scanVM: ScanViewModel
     @State private var currentPage = 0
     @State private var notificationGranted = false
     @State private var photoAuthorized = false
 
-    private let totalPages = 4
+    private let totalPages = 5
 
     var body: some View {
         ZStack {
@@ -25,8 +26,11 @@ struct OnboardingView: View {
                 NotificationPage(granted: $notificationGranted, onNext: goNext)
                     .tag(2)
 
-                PhotoAccessPage(authorized: $photoAuthorized, onFinish: finish)
+                PhotoAccessPage(authorized: $photoAuthorized, onNext: goNext)
                     .tag(3)
+
+                StartScanPage(scanVM: scanVM, onFinish: finish)
+                    .tag(4)
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
             .animation(.easeInOut(duration: 0.35), value: currentPage)
@@ -421,7 +425,7 @@ private struct NotificationPage: View {
 // MARK: - Photo Library Access Page
 private struct PhotoAccessPage: View {
     @Binding var authorized: Bool
-    var onFinish: () -> Void
+    var onNext: () -> Void
     @State private var animateIn = false
     @State private var denied = false
 
@@ -492,9 +496,9 @@ private struct PhotoAccessPage: View {
                 }
 
                 Button {
-                    onFinish()
+                    onNext()
                 } label: {
-                    Text(authorized ? L10n.onboardingStart : L10n.onboardingSkip)
+                    Text(authorized ? L10n.onboardingNext : L10n.onboardingSkip)
                         .font(AppTypography.body)
                         .foregroundColor(authorized ? AppColors.purple : AppColors.textTertiary)
                 }
@@ -525,13 +529,57 @@ private struct PhotoAccessPage: View {
                 case .authorized, .limited:
                     authorized = true
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
-                        onFinish()
+                        onNext()
                     }
                 case .denied, .restricted:
                     denied = true
                 default:
                     break
                 }
+            }
+        }
+    }
+}
+
+// MARK: - Start Scan Page (Onboarding Page 5)
+private struct StartScanPage: View {
+    @ObservedObject var scanVM: ScanViewModel
+    var onFinish: () -> Void
+    @State private var started = false
+    @State private var finishTask: Task<Void, Never>?
+
+    var body: some View {
+        ZStack {
+            AppColors.darkBG.ignoresSafeArea()
+            if started {
+                ScanningView(vm: scanVM, showsCancel: false)
+            } else {
+                ScanIdleView(onStart: startScan)
+            }
+        }
+        .onDisappear {
+            finishTask?.cancel()
+            finishTask = nil
+        }
+    }
+
+    private func startScan() {
+        guard !started else { return }
+        started = true
+        scanVM.startScan()
+        finishTask?.cancel()
+        finishTask = Task {
+            // Keep onboarding visible for the first-pass 20s scan window.
+            try? await Task.sleep(nanoseconds: 20_000_000_000)
+            guard !Task.isCancelled else { return }
+            // Give scan state a brief chance to flip to first-pass result mode.
+            let deadline = Date().addingTimeInterval(2.0)
+            while !Task.isCancelled, scanVM.phase == .scanning, Date() < deadline {
+                try? await Task.sleep(nanoseconds: 200_000_000)
+            }
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                onFinish()
             }
         }
     }

@@ -1,8 +1,8 @@
 import SwiftUI
 
 struct ContentView: View {
-    @StateObject private var scanVM = ScanViewModel()
-    @StateObject private var libraryVM = LibraryViewModel()
+    @ObservedObject var scanVM: ScanViewModel
+    @ObservedObject var libraryVM: LibraryViewModel
     @State private var selectedTab = 0
     @AppStorage("appLanguage") private var appLanguage = "zh"
 
@@ -43,9 +43,7 @@ struct ContentView: View {
         .task {
             await scanVM.requestAuthorizationOnAppLaunchIfNeeded()
             await scanVM.loadCachedResultsIfAvailable()
-            Task(priority: .utility) {
-                await libraryVM.prewarmForFirstTimelineEntry()
-            }
+            scanVM.startIncrementalSyncOnAppLaunchIfNeeded()
         }
     }
 }

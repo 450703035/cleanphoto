@@ -36,7 +36,7 @@ struct PhotoGroup: Identifiable {
 
 // MARK: - Album folder (timeline)
 struct AlbumFolder: Identifiable {
-    let id = UUID()
+    let id: String
     var title: String
     var assets: [PhotoAsset]
     var date: Date

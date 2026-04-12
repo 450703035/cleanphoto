@@ -117,6 +117,32 @@ class LibraryViewModel: ObservableObject {
         timelineInteractionActive = active
     }
 
+    /// Accepts externally-scanned assets (from ScanViewModel) and rebuilds timeline sections.
+    /// Used by Timeline tab to show only the scanned subset during long-running scans.
+    func applyScannedSubset(_ assets: [PhotoAsset]) async {
+        allAssets = assets
+        guard !assets.isEmpty else {
+            yearGroups = [:]
+            dayMap = [:]
+            rebuildSizeCaches()
+            return
+        }
+        let (groups, map) = await Task.detached(priority: .userInitiated) {
+            (LibraryViewModel.computeYearGroups(assets), LibraryViewModel.computeDayMap(assets))
+        }.value
+        yearGroups = groups
+        dayMap = map
+        rebuildSizeCaches()
+    }
+
+    func clearTimeline() {
+        allAssets = []
+        yearGroups = [:]
+        dayMap = [:]
+        scoringProgress = 0
+        rebuildSizeCaches()
+    }
+
     func load(force: Bool = false) async {
         guard !isLoading else { return }
         if !force {
@@ -152,13 +178,16 @@ class LibraryViewModel: ObservableObject {
         }
         let ids = raw.map { $0.id }
         let cached = await DatabaseService.shared.loadScores(for: ids)
+        let metadata = await DatabaseService.shared.loadMetadata(for: ids)
 
         let assets = raw.map { a -> PhotoAsset in
             var a = a
             if let c = cached[a.id] {
                 a.score = c.score
                 a.isSelected = Self.shouldAutoSelect(score: c.score, hasFaces: c.hasFaces)
-                a.fileSizeBytes = c.fileSizeBytes
+                a.fileSizeBytes = c.fileSizeBytes ?? metadata[a.id]?.fileSizeBytes
+            } else if let m = metadata[a.id] {
+                a.fileSizeBytes = m.fileSizeBytes
             }
             return a
         }
@@ -187,6 +216,7 @@ class LibraryViewModel: ObservableObject {
         if uncached.isEmpty {
             Task.detached(priority: .background) {
                 await DatabaseService.shared.pruneStaleScores(keepIds: Set(ids))
+                await DatabaseService.shared.pruneStaleMetadata(keepIds: Set(ids))
             }
             return
         }
@@ -216,6 +246,7 @@ class LibraryViewModel: ObservableObject {
             await DatabaseService.shared.saveScores(scored.entries)
             guard !Task.isCancelled else { return }
             await DatabaseService.shared.pruneStaleScores(keepIds: Set(idsSnapshot))
+            await DatabaseService.shared.pruneStaleMetadata(keepIds: Set(idsSnapshot))
             guard !Task.isCancelled else { return }
 
             self.store.setAssets(scored.assets)
@@ -250,6 +281,7 @@ class LibraryViewModel: ObservableObject {
             let monthLabel = L10n.monthLabel(m)
             let title = df.string(from: dayAssets.first!.creationDate)
             let folder = AlbumFolder(
+                id: key,
                 title: title,
                 assets: dayAssets.sorted { $0.score > $1.score },
                 date: dayAssets.first!.creationDate

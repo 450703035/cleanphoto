@@ -112,6 +112,7 @@ struct ScanIdleView: View {
 // MARK: - Scanning animation
 struct ScanningView: View {
     @ObservedObject var vm: ScanViewModel
+    var showsCancel: Bool = true
 
     var body: some View {
         VStack(spacing: 0) {
@@ -148,13 +149,15 @@ struct ScanningView: View {
                     .font(AppTypography.caption).foregroundColor(AppColors.textSecondary)
             }
 
-            // Cancel button — vm.reset() calls scanTask?.cancel() then returns to idle
-            Button(action: vm.reset) {
-                Text(L10n.cancelScan)
-                    .foregroundColor(AppColors.lightPurple)
+            if showsCancel {
+                // Cancel button — vm.reset() calls scanTask?.cancel() then returns to idle
+                Button(action: vm.reset) {
+                    Text(L10n.cancelScan)
+                        .foregroundColor(AppColors.lightPurple)
+                }
+                .buttonStyle(AppleOutlineButtonStyle())
+                .padding(.top, 20)
             }
-            .buttonStyle(AppleOutlineButtonStyle())
-            .padding(.top, 20)
 
             Spacer()
         }
@@ -388,10 +391,6 @@ struct ResultDashboard: View {
                             .foregroundColor(AppColors.textSecondary)
                     }
                     Spacer()
-                    Button(action: vm.reset) {
-                        Image(systemName: "arrow.counterclockwise")
-                            .font(.title3).foregroundColor(AppColors.purple)
-                    }
                 }
                 .padding(.horizontal).padding(.top)
 

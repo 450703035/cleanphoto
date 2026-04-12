@@ -247,26 +247,43 @@ private struct ThemeModeSelectionView: View {
     var body: some View {
         ZStack {
             AppColors.darkBG.ignoresSafeArea()
-            List {
-                ForEach(AppThemeMode.allCases) { mode in
-                    Button {
-                        themeModeRaw = mode.rawValue
-                    } label: {
-                        HStack {
-                            Text(mode.title)
-                                .foregroundColor(AppColors.textPrimary)
-                            Spacer()
-                            if mode == currentThemeMode {
-                                Image(systemName: "checkmark")
-                                    .foregroundColor(AppColors.lightPurple)
+            ScrollView {
+                VStack(spacing: 0) {
+                    ForEach(Array(AppThemeMode.allCases.enumerated()), id: \.element.id) { index, mode in
+                        Button {
+                            themeModeRaw = mode.rawValue
+                        } label: {
+                            HStack {
+                                Text(mode.title)
+                                    .foregroundColor(AppColors.textPrimary)
+                                Spacer()
+                                if mode == currentThemeMode {
+                                    Image(systemName: "checkmark")
+                                        .foregroundColor(AppColors.lightPurple)
+                                }
                             }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 14)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        if index < AppThemeMode.allCases.count - 1 {
+                            Divider()
+                                .background(AppColors.separator)
+                                .padding(.leading, 14)
                         }
                     }
-                    .buttonStyle(.plain)
-                    .listRowBackground(AppColors.deepCard)
                 }
+                .background(AppColors.deepCard)
+                .cornerRadius(AppShape.cardRadius)
+                .overlay(
+                    RoundedRectangle(cornerRadius: AppShape.cardRadius)
+                        .stroke(AppColors.subtleBorder, lineWidth: AppShape.borderWidth)
+                )
+                .padding(.horizontal)
+                .padding(.top, 14)
             }
-            .scrollContentBackground(.hidden)
         }
         .navigationTitle(L10n.displayMode)
         .navigationBarTitleDisplayMode(.inline)
@@ -284,26 +301,43 @@ private struct LanguageSelectionView: View {
     var body: some View {
         ZStack {
             AppColors.darkBG.ignoresSafeArea()
-            List {
-                ForEach(AppLanguage.allCases) { lang in
-                    Button {
-                        appLanguageRaw = lang.rawValue
-                    } label: {
-                        HStack {
-                            Text(lang.displayName)
-                                .foregroundColor(AppColors.textPrimary)
-                            Spacer()
-                            if lang == currentLanguage {
-                                Image(systemName: "checkmark")
-                                    .foregroundColor(AppColors.lightPurple)
+            ScrollView {
+                VStack(spacing: 0) {
+                    ForEach(Array(AppLanguage.allCases.enumerated()), id: \.element.id) { index, lang in
+                        Button {
+                            appLanguageRaw = lang.rawValue
+                        } label: {
+                            HStack {
+                                Text(lang.displayName)
+                                    .foregroundColor(AppColors.textPrimary)
+                                Spacer()
+                                if lang == currentLanguage {
+                                    Image(systemName: "checkmark")
+                                        .foregroundColor(AppColors.lightPurple)
+                                }
                             }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 14)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        if index < AppLanguage.allCases.count - 1 {
+                            Divider()
+                                .background(AppColors.separator)
+                                .padding(.leading, 14)
                         }
                     }
-                    .buttonStyle(.plain)
-                    .listRowBackground(AppColors.deepCard)
                 }
+                .background(AppColors.deepCard)
+                .cornerRadius(AppShape.cardRadius)
+                .overlay(
+                    RoundedRectangle(cornerRadius: AppShape.cardRadius)
+                        .stroke(AppColors.subtleBorder, lineWidth: AppShape.borderWidth)
+                )
+                .padding(.horizontal)
+                .padding(.top, 14)
             }
-            .scrollContentBackground(.hidden)
         }
         .navigationTitle(L10n.language)
         .navigationBarTitleDisplayMode(.inline)

@@ -1,6 +1,49 @@
 import SwiftUI
 import Photos
 
+final class ThumbnailCacheManager {
+    static let shared = ThumbnailCacheManager()
+    private let manager = PHCachingImageManager()
+
+    private init() {}
+
+    func requestImage(
+        for asset: PHAsset,
+        targetSize: CGSize,
+        contentMode: PHImageContentMode,
+        networkAccessAllowed: Bool = false,
+        completion: @escaping (UIImage?) -> Void
+    ) -> PHImageRequestID {
+        let opts = PHImageRequestOptions()
+        opts.deliveryMode = .opportunistic
+        opts.resizeMode = .fast
+        opts.isSynchronous = false
+        opts.isNetworkAccessAllowed = networkAccessAllowed
+        return manager.requestImage(
+            for: asset,
+            targetSize: targetSize,
+            contentMode: contentMode,
+            options: opts
+        ) { image, _ in
+            completion(image)
+        }
+    }
+
+    func cancelRequest(_ requestID: PHImageRequestID) {
+        manager.cancelImageRequest(requestID)
+    }
+
+    func startCaching(_ assets: [PHAsset], targetSize: CGSize, contentMode: PHImageContentMode) {
+        guard !assets.isEmpty else { return }
+        manager.startCachingImages(for: assets, targetSize: targetSize, contentMode: contentMode, options: nil)
+    }
+
+    func stopCaching(_ assets: [PHAsset], targetSize: CGSize, contentMode: PHImageContentMode) {
+        guard !assets.isEmpty else { return }
+        manager.stopCachingImages(for: assets, targetSize: targetSize, contentMode: contentMode, options: nil)
+    }
+}
+
 // MARK: - Score badge
 struct ScoreBadge: View {
     let score: Int
@@ -45,7 +88,7 @@ struct PhotoThumbnail: View {
         }
         .onDisappear {
             if let rid = requestID {
-                PHImageManager.default().cancelImageRequest(rid)
+                ThumbnailCacheManager.shared.cancelRequest(rid)
                 requestID = nil
             }
         }
@@ -54,20 +97,19 @@ struct PhotoThumbnail: View {
     private func load() async {
         // Cancel any previous request for this view
         if let rid = requestID {
-            PHImageManager.default().cancelImageRequest(rid)
+            ThumbnailCacheManager.shared.cancelRequest(rid)
             requestID = nil
         }
         let h = height ?? size
-        let targetSize = CGSize(width: size * 2, height: h * 2)
-        let opts = PHImageRequestOptions()
-        opts.deliveryMode = .opportunistic
-        opts.isSynchronous = false
-        opts.isNetworkAccessAllowed = false
+        let scale = UIScreen.main.scale
+        let targetSize = CGSize(width: size * scale, height: h * scale)
         let phMode: PHImageContentMode = (contentMode == .fill) ? .aspectFill : .aspectFit
-        let rid = PHImageManager.default().requestImage(
-            for: asset, targetSize: targetSize,
-            contentMode: phMode, options: opts
-        ) { img, _ in
+        let rid = ThumbnailCacheManager.shared.requestImage(
+            for: asset,
+            targetSize: targetSize,
+            contentMode: phMode,
+            networkAccessAllowed: false
+        ) { img in
             Task { @MainActor in
                 if let img { image = img }
             }
@@ -314,6 +356,8 @@ struct AlbumFolderCell: View {
     let folder: AlbumFolder
     var onTap: () -> Void
     var onLongPress: () -> Void
+    var onVisible: () -> Void = {}
+    var onHidden: () -> Void = {}
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -378,6 +422,8 @@ struct AlbumFolderCell: View {
         .aspectRatio(1, contentMode: .fit)
         .onTapGesture(perform: onTap)
         .onLongPressGesture(minimumDuration: 0.6, perform: onLongPress)
+        .onAppear(perform: onVisible)
+        .onDisappear(perform: onHidden)
     }
 }
 

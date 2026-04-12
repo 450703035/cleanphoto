@@ -16,6 +16,8 @@ class ScanViewModel: ObservableObject {
     @Published var backgroundProgress: Double = 0
     @Published var backgroundLabel: String = ""
     @Published private(set) var isUserInteractingInDetail: Bool = false
+    @Published private(set) var timelineVisibleAssets: [PhotoAsset] = []
+    @Published private(set) var timelineCanShowAssets: Bool = false
 
     @Published var duplicateGroups: [PhotoGroup] = []
     @Published var similarGroups:   [PhotoGroup] = []
@@ -31,6 +33,9 @@ class ScanViewModel: ObservableObject {
     private var scanTask: Task<Void, Never>?
     private var backgroundAnalysisTask: Task<Void, Never>?
     private var scanClockTask: Task<Void, Never>?
+    private var metadataWarmupTask: Task<Void, Never>?
+    private var launchIncrementalSyncTask: Task<Void, Never>?
+    private let timelineRevealSeconds = 20
     private var cancellables = Set<AnyCancellable>()
 
     var scanElapsedText: String {
@@ -64,10 +69,35 @@ class ScanViewModel: ObservableObject {
         switch status {
         case .authorized, .limited:
             authorized = true
+            if phase == .idle, !isBackgroundAnalyzing {
+                startMetadataWarmupIfNeeded()
+            }
         case .notDetermined:
             authorized = await service.requestAuthorization()
+            if authorized, phase == .idle, !isBackgroundAnalyzing {
+                startMetadataWarmupIfNeeded()
+            }
         default:
             authorized = false
+        }
+    }
+
+    /// Background incremental sync on app launch:
+    /// - only score/process photos never scanned before
+    /// - only check existence for previously scanned photos
+    func startIncrementalSyncOnAppLaunchIfNeeded() {
+        guard launchIncrementalSyncTask == nil else { return }
+        guard phase == .idle, !isBackgroundAnalyzing else { return }
+        let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+        guard status == .authorized || status == .limited else { return }
+        launchIncrementalSyncTask = Task(priority: .utility) { [weak self] in
+            guard let self else { return }
+            defer {
+                Task { @MainActor [weak self] in
+                    self?.launchIncrementalSyncTask = nil
+                }
+            }
+            await self.performIncrementalLaunchSync()
         }
     }
 
@@ -93,17 +123,22 @@ class ScanViewModel: ObservableObject {
         let cached = await DatabaseService.shared.loadScores(for: ids)
         guard !cached.isEmpty else { return }
 
+        let metadata = await DatabaseService.shared.loadMetadata(for: ids)
         let scored = raw.map { a -> PhotoAsset in
             var a = a
             if let c = cached[a.id] {
                 a.score = c.score
                 a.isSelected = LibraryViewModel.shouldAutoSelect(score: c.score, hasFaces: c.hasFaces)
-                a.fileSizeBytes = c.fileSizeBytes
+                a.fileSizeBytes = c.fileSizeBytes ?? metadata[a.id]?.fileSizeBytes
+            } else if let m = metadata[a.id] {
+                a.fileSizeBytes = m.fileSizeBytes
             }
             return a
         }
         store.setAssets(scored)
         allAssets = scored
+        timelineVisibleAssets = scored
+        timelineCanShowAssets = true
 
         // Reconstruct groups from DB, filtering out any assets that no longer exist
         let assetMap = Dictionary(uniqueKeysWithValues: scored.map { ($0.id, $0) })
@@ -167,6 +202,8 @@ class ScanViewModel: ObservableObject {
         backgroundLabel = ""
         duplicateGroups = []; similarGroups = []
         screenshots = []; videos = []; lowQuality = []; favorites = []; behaviorAssets = []; allAssets = []
+        timelineVisibleAssets = []
+        timelineCanShowAssets = false
     }
 
     func setDetailInteraction(_ active: Bool) {
@@ -177,10 +214,16 @@ class ScanViewModel: ObservableObject {
     // MARK: - Scan
 
     private func runScan() async {
+        metadataWarmupTask?.cancel()
+        metadataWarmupTask = nil
+        launchIncrementalSyncTask?.cancel()
+        launchIncrementalSyncTask = nil
         backgroundAnalysisTask?.cancel()
         isBackgroundAnalyzing = false
         backgroundProgress = 0
         backgroundLabel = ""
+        timelineVisibleAssets = []
+        timelineCanShowAssets = false
 
         let scanStart = Date()
         scanElapsedSeconds = 0
@@ -205,6 +248,7 @@ class ScanViewModel: ObservableObject {
 
         // Phase A: first-pass scan (target ~1 minute before showing dashboard)
         phaseLabel = L10n.scanPhaseA
+        progress = 0.02
         let raw = await service.fetchAllAssets()
         guard !raw.isEmpty else {
             scanClockTask?.cancel()
@@ -213,10 +257,13 @@ class ScanViewModel: ObservableObject {
             return
         }
         allAssets = raw
+        progress = 0.08
 
         let ids = raw.map { $0.id }
         let cached = await DatabaseService.shared.loadScores(for: ids)
+        let metadata = await DatabaseService.shared.loadMetadata(for: ids)
         let activeScannedIds = await DatabaseService.shared.loadActiveScannedIds(for: ids)
+        progress = 0.14
         let cachedScannedIds = Set(cached.keys)
         if !cachedScannedIds.isEmpty {
             // Backfill scan-state table for users upgrading from older schema.
@@ -231,27 +278,16 @@ class ScanViewModel: ObservableObject {
             if let c = cached[a.id] {
                 a.score = c.score
                 a.isSelected = LibraryViewModel.shouldAutoSelect(score: c.score, hasFaces: c.hasFaces)
-                a.fileSizeBytes = c.fileSizeBytes
+                a.fileSizeBytes = c.fileSizeBytes ?? metadata[a.id]?.fileSizeBytes
+            } else if let m = metadata[a.id] {
+                a.fileSizeBytes = m.fileSizeBytes
             }
             return a
         }
+        var scannedIDs = Set(cached.keys)
+        analyzedCount = scannedIDs.count
 
-        store.setAssets(scored)
-        allAssets = scored
-        let nonFavorite = scored.filter { !$0.asset.isFavorite }
-        let assetMap = Dictionary(uniqueKeysWithValues: scored.map { ($0.id, $0) })
         let rows = await DatabaseService.shared.loadGroupRows()
-        let (cachedDup, cachedSim) = rebuildGroups(from: rows, assetMap: assetMap)
-        duplicateGroups = cachedDup.map { filteredGroupExcludingFavorites($0) }.filter { $0.assets.count >= 2 }
-        similarGroups = cachedSim.map { filteredGroupExcludingFavorites($0) }.filter { $0.assets.count >= 2 }
-
-        screenshots = nonFavorite.filter { $0.asset.mediaSubtypes.contains(.photoScreenshot) }
-            .map { var a = $0; a.isSelected = a.score < 45; return a }
-        videos = nonFavorite.filter { $0.asset.mediaType == .video }
-            .sorted { $0.sizeBytes > $1.sizeBytes }
-            .map { var a = $0; a.isSelected = false; return a }
-        favorites = scored.filter { $0.asset.isFavorite }
-            .map { var a = $0; a.isSelected = false; return a }
         let cachedQualityMap: [String: PhotoLibraryService.QualitySignals] = cached.mapValues {
             PhotoLibraryService.QualitySignals(
                 isBlurry: $0.isBlurry,
@@ -261,28 +297,25 @@ class ScanViewModel: ObservableObject {
                 isUnderExposed: $0.isUnderExposed
             )
         }
-        lowQuality = service.findLowQuality(assets: nonFavorite, qualityMap: cachedQualityMap)
-        behaviorAssets = buildBehaviorAssets(
-            from: nonFavorite,
-            excludingIDs: occupiedAssetIDsForOtherCategories(
-                duplicateGroups: duplicateGroups,
-                similarGroups: similarGroups,
-                screenshots: screenshots,
-                videos: videos,
-                lowQuality: lowQuality
-            )
-        )
-        // Make behavior size trustworthy in first-pass result.
-        let firstPassBehavior = await service.populateFileSizes(for: behaviorAssets, limit: behaviorAssets.count)
-        behaviorAssets = firstPassBehavior
-        scored = mergeFileSizes(into: scored, from: firstPassBehavior)
-        let firstPassEntries = firstPassBehavior.compactMap { item -> DatabaseService.FileSizeEntry? in
-            guard let size = item.fileSizeBytes, size > 0 else { return nil }
-            return DatabaseService.FileSizeEntry(localId: item.id, fileSizeBytes: size)
-        }
-        await DatabaseService.shared.saveFileSizes(firstPassEntries)
 
-        buildSummary(assets: scored)
+        let warmed = await warmupMetadataBeforeReveal(
+            scoredAssets: scored,
+            scannedIDs: scannedIDs,
+            scanStart: scanStart
+        )
+        scored = warmed.scoredAssets
+        scannedIDs = warmed.scannedIDs
+        let warmedAssetMap = Dictionary(uniqueKeysWithValues: scored.map { ($0.id, $0) })
+        let (warmedDup, warmedSim) = rebuildGroups(from: rows, assetMap: warmedAssetMap)
+
+        publishPartialResults(
+            scoredAssets: scored,
+            scannedIDs: scannedIDs,
+            qualityMap: cachedQualityMap,
+            duplicateSeed: warmedDup,
+            similarSeed: warmedSim,
+            elapsedSeconds: Int(Date().timeIntervalSince(scanStart))
+        )
 
         // Phase B: deep pass in background (duplicates/similar/quality/size calibration)
         isBackgroundAnalyzing = true
@@ -295,6 +328,9 @@ class ScanViewModel: ObservableObject {
                 raw: raw,
                 initialScored: scored,
                 cached: cached,
+                initialScannedIDs: scannedIDs,
+                duplicateSeed: warmedDup,
+                similarSeed: warmedSim,
                 ids: ids,
                 newAssetIDs: newAssetIDs,
                 scanStart: scanStart
@@ -303,8 +339,7 @@ class ScanViewModel: ObservableObject {
 
         // For repeat scans (no new assets), don't keep users on a forced waiting screen.
         // Only keep a short settling window when we truly have new/uncached work.
-        let hasPendingDeepWork = !newAssetIDs.isEmpty || cached.count < ids.count
-        let minimumFirstPassSeconds = hasPendingDeepWork ? 15 : 0
+        let minimumFirstPassSeconds = timelineRevealSeconds
         if minimumFirstPassSeconds > 0 {
             while !Task.isCancelled {
                 let elapsed = Int(Date().timeIntervalSince(scanStart))
@@ -319,7 +354,7 @@ class ScanViewModel: ObservableObject {
             scanClockTask?.cancel()
             return
         }
-        progress = 1.0
+        progress = max(progress, 0.6)
         phase = .done
         if !isBackgroundAnalyzing {
             finalizeScanDuration(scanStart: scanStart)
@@ -330,6 +365,9 @@ class ScanViewModel: ObservableObject {
         raw: [PhotoAsset],
         initialScored: [PhotoAsset],
         cached: [String: DatabaseService.CachedScore],
+        initialScannedIDs: Set<String>,
+        duplicateSeed: [PhotoGroup],
+        similarSeed: [PhotoGroup],
         ids: [String],
         newAssetIDs: Set<String>,
         scanStart: Date
@@ -337,8 +375,9 @@ class ScanViewModel: ObservableObject {
         var scored = initialScored
         let total = max(raw.count, 1)
         let uncached = (0..<raw.count).filter { cached[raw[$0].id] == nil }
-        let baseAnalyzedCount = raw.count - uncached.count
+        let baseAnalyzedCount = initialScannedIDs.count
         analyzedCount = baseAnalyzedCount
+        var scannedIDs = initialScannedIDs
 
         var newEntries: [DatabaseService.ScoreEntry] = []
         var qualityMap: [String: PhotoLibraryService.QualitySignals] = [:]
@@ -357,11 +396,11 @@ class ScanViewModel: ObservableObject {
 
         var nextPos = 0
         var inFlight = 0
-        var localAnalyzedCount = baseAnalyzedCount
-        var lastPublishedCount = baseAnalyzedCount
-        var lastPublishAt = Date.distantPast
-        let publishStride = 50
-        let publishInterval: TimeInterval = 0.35
+        var localVisibleCount = baseAnalyzedCount
+        var localScoredCount = max(0, min(total, cached.count))
+        var lastPublishedAt = Date.distantPast
+        let publishInterval: TimeInterval = 3.0
+        var pendingSizeHydrationIndices: [Int] = []
 
         await withTaskGroup(of: (Int, PhotoLibraryService.ScoreResult).self) { group in
             func enqueueTasksIfNeeded() async {
@@ -388,7 +427,13 @@ class ScanViewModel: ObservableObject {
                     score: result.score,
                     hasFaces: result.hasFaces
                 )
-                localAnalyzedCount += 1
+                if scannedIDs.insert(raw[idx].id).inserted {
+                    localVisibleCount += 1
+                }
+                localScoredCount = min(total, localScoredCount + 1)
+                if scored[idx].fileSizeBytes == nil {
+                    pendingSizeHydrationIndices.append(idx)
+                }
 
                 newEntries.append(DatabaseService.ScoreEntry(
                     localId:        raw[idx].id,
@@ -408,15 +453,39 @@ class ScanViewModel: ObservableObject {
                 )
 
                 let now = Date()
-                let reachedStride = (localAnalyzedCount - lastPublishedCount) >= publishStride
-                let reachedInterval = now.timeIntervalSince(lastPublishAt) >= publishInterval
-                let finished = localAnalyzedCount >= total
-                if reachedStride || reachedInterval || finished {
-                    analyzedCount = localAnalyzedCount
-                    backgroundProgress = 0.10 + (Double(localAnalyzedCount) / Double(total)) * 0.45
-                    allAssets = scored
-                    lastPublishedCount = localAnalyzedCount
-                    lastPublishAt = now
+                let reachedInterval = now.timeIntervalSince(lastPublishedAt) >= publishInterval
+                let finished = localScoredCount >= total
+                if reachedInterval || finished {
+                    if !pendingSizeHydrationIndices.isEmpty {
+                        let uniquePending = Array(Set(pendingSizeHydrationIndices)).sorted()
+                        let pendingBatch = uniquePending.map { scored[$0] }
+                        let hydratedBatch = await service.populateFileSizes(for: pendingBatch, limit: pendingBatch.count)
+                        for (offset, index) in uniquePending.enumerated() {
+                            scored[index] = hydratedBatch[offset]
+                        }
+                        let sizeEntries: [DatabaseService.FileSizeEntry] = hydratedBatch.compactMap { item in
+                            guard let size = item.fileSizeBytes, size > 0 else { return nil }
+                            return DatabaseService.FileSizeEntry(localId: item.id, fileSizeBytes: size)
+                        }
+                        if !sizeEntries.isEmpty {
+                            await DatabaseService.shared.saveFileSizes(sizeEntries)
+                        }
+                        await DatabaseService.shared.upsertAssetMetadata(metadataEntries(from: hydratedBatch))
+                        pendingSizeHydrationIndices.removeAll()
+                    }
+
+                    analyzedCount = (phase == .done) ? localScoredCount : localVisibleCount
+                    backgroundProgress = 0.10 + (Double(localScoredCount) / Double(total)) * 0.45
+                    progress = min(0.88, backgroundProgress)
+                    publishPartialResults(
+                        scoredAssets: scored,
+                        scannedIDs: scannedIDs,
+                        qualityMap: qualityMap,
+                        duplicateSeed: duplicateSeed,
+                        similarSeed: similarSeed,
+                        elapsedSeconds: Int(Date().timeIntervalSince(scanStart))
+                    )
+                    lastPublishedAt = now
                 }
 
                 await enqueueTasksIfNeeded()
@@ -429,11 +498,31 @@ class ScanViewModel: ObservableObject {
             return
         }
 
-        if analyzedCount != localAnalyzedCount {
-            analyzedCount = localAnalyzedCount
+        analyzedCount = localScoredCount
+        if !pendingSizeHydrationIndices.isEmpty {
+            let uniquePending = Array(Set(pendingSizeHydrationIndices)).sorted()
+            let pendingBatch = uniquePending.map { scored[$0] }
+            let hydratedBatch = await service.populateFileSizes(for: pendingBatch, limit: pendingBatch.count)
+            for (offset, index) in uniquePending.enumerated() {
+                scored[index] = hydratedBatch[offset]
+            }
+            let sizeEntries: [DatabaseService.FileSizeEntry] = hydratedBatch.compactMap { item in
+                guard let size = item.fileSizeBytes, size > 0 else { return nil }
+                return DatabaseService.FileSizeEntry(localId: item.id, fileSizeBytes: size)
+            }
+            if !sizeEntries.isEmpty {
+                await DatabaseService.shared.saveFileSizes(sizeEntries)
+            }
+            await DatabaseService.shared.upsertAssetMetadata(metadataEntries(from: hydratedBatch))
         }
-        allAssets = scored
-        store.setAssets(scored)
+        publishPartialResults(
+            scoredAssets: scored,
+            scannedIDs: scannedIDs,
+            qualityMap: qualityMap,
+            duplicateSeed: duplicateSeed,
+            similarSeed: similarSeed,
+            elapsedSeconds: Int(Date().timeIntervalSince(scanStart))
+        )
         await DatabaseService.shared.saveScores(newEntries)
         if !newAssetIDs.isEmpty {
             await DatabaseService.shared.markAssetsScanned(Array(newAssetIDs))
@@ -444,10 +533,12 @@ class ScanViewModel: ObservableObject {
 
         backgroundLabel = L10n.bgDuplicates
         backgroundProgress = 0.62
+        progress = max(progress, 0.90)
         let newDuplicateGroups = await service.findDuplicates(assets: newNonFavorite)
 
         backgroundLabel = L10n.bgSimilar
         backgroundProgress = 0.74
+        progress = max(progress, 0.93)
         let newSimilarGroups = await service.findSimilar(assets: newNonFavorite)
 
         let mergedDuplicateGroups = mergeGroups(duplicateGroups + newDuplicateGroups)
@@ -457,6 +548,7 @@ class ScanViewModel: ObservableObject {
 
         backgroundLabel = L10n.bgLowQuality
         backgroundProgress = 0.84
+        progress = max(progress, 0.95)
         lowQuality = service.findLowQuality(assets: nonFavorite, qualityMap: qualityMap)
 
         // Rebuild behavior bucket using 6-category mutual exclusion.
@@ -487,6 +579,7 @@ class ScanViewModel: ObservableObject {
 
         backgroundLabel = L10n.bgSaving
         backgroundProgress = 0.95
+        progress = max(progress, 0.97)
         await DatabaseService.shared.saveGroups(duplicateGroups + similarGroups)
         await DatabaseService.shared.saveScanRecord(
             summary: summary,
@@ -497,16 +590,18 @@ class ScanViewModel: ObservableObject {
 
         Task.detached(priority: .background) {
             await DatabaseService.shared.pruneStaleScores(keepIds: Set(ids))
+            await DatabaseService.shared.pruneStaleMetadata(keepIds: Set(ids))
         }
 
         backgroundProgress = 1.0
         backgroundLabel = L10n.bgComplete
-        if phase == .done {
-            finalizeScanDuration(scanStart: scanStart)
-        }
+        progress = 1.0
+        timelineVisibleAssets = scored
+        timelineCanShowAssets = true
+        finalizeScanDuration(scanStart: scanStart)
+        phase = .done
         isBackgroundAnalyzing = false
         phaseLabel = L10n.scanComplete
-        progress = 1.0
         startBackgroundFileSizeHydration()
     }
 
@@ -635,6 +730,7 @@ class ScanViewModel: ObservableObject {
             return DatabaseService.FileSizeEntry(localId: item.id, fileSizeBytes: size)
         }
         await DatabaseService.shared.saveFileSizes(fileSizeEntries)
+        await DatabaseService.shared.upsertAssetMetadata(metadataEntries(from: allAssets))
     }
 
     private func mergeFileSizes(into current: [PhotoAsset], from hydrated: [PhotoAsset]) -> [PhotoAsset] {
@@ -695,5 +791,214 @@ class ScanViewModel: ObservableObject {
         scanClockTask?.cancel()
         scanElapsedSeconds = Int(Date().timeIntervalSince(scanStart))
         lastScanDurationSeconds = scanElapsedSeconds
+    }
+
+    private func warmupMetadataBeforeReveal(
+        scoredAssets: [PhotoAsset],
+        scannedIDs: Set<String>,
+        scanStart: Date
+    ) async -> (scoredAssets: [PhotoAsset], scannedIDs: Set<String>) {
+        var updated = scoredAssets
+        var scanned = scannedIDs
+        let total = max(updated.count, 1)
+        let deadline = scanStart.addingTimeInterval(TimeInterval(timelineRevealSeconds))
+
+        analyzedCount = scanned.count
+        progress = max(progress, min(0.55, Double(scanned.count) / Double(total) * 0.55))
+
+        let pendingIndices = updated.indices.filter { !scanned.contains(updated[$0].id) }
+        var cursor = 0
+        let batchSize = 200
+
+        while cursor < pendingIndices.count, Date() < deadline, !Task.isCancelled {
+            let end = min(cursor + batchSize, pendingIndices.count)
+            let slice = Array(pendingIndices[cursor..<end])
+            let batch = slice.map { updated[$0] }
+            let hydratedBatch = await service.populateFileSizes(for: batch, limit: batch.count)
+
+            for (offset, index) in slice.enumerated() {
+                updated[index] = hydratedBatch[offset]
+                scanned.insert(updated[index].id)
+            }
+
+            let sizeEntries: [DatabaseService.FileSizeEntry] = hydratedBatch.compactMap { item in
+                guard let size = item.fileSizeBytes, size > 0 else { return nil }
+                return DatabaseService.FileSizeEntry(localId: item.id, fileSizeBytes: size)
+            }
+            if !sizeEntries.isEmpty {
+                await DatabaseService.shared.saveFileSizes(sizeEntries)
+            }
+            await DatabaseService.shared.upsertAssetMetadata(metadataEntries(from: hydratedBatch))
+
+            analyzedCount = scanned.count
+            progress = max(progress, min(0.55, Double(scanned.count) / Double(total) * 0.55))
+            cursor = end
+        }
+
+        return (updated, scanned)
+    }
+
+    private func publishPartialResults(
+        scoredAssets: [PhotoAsset],
+        scannedIDs: Set<String>,
+        qualityMap: [String: PhotoLibraryService.QualitySignals],
+        duplicateSeed: [PhotoGroup],
+        similarSeed: [PhotoGroup],
+        elapsedSeconds: Int
+    ) {
+        let subset = scoredAssets.filter { scannedIDs.contains($0.id) }
+        allAssets = subset
+        store.setAssets(subset)
+
+        duplicateGroups = duplicateSeed.compactMap { group in
+            let kept = group.assets.filter { scannedIDs.contains($0.id) && !$0.asset.isFavorite }
+            guard kept.count >= 2 else { return nil }
+            return PhotoGroup(assets: kept, groupType: group.groupType)
+        }
+        similarGroups = similarSeed.compactMap { group in
+            let kept = group.assets.filter { scannedIDs.contains($0.id) && !$0.asset.isFavorite }
+            guard kept.count >= 2 else { return nil }
+            return PhotoGroup(assets: kept, groupType: group.groupType)
+        }
+
+        let nonFavorite = subset.filter { !$0.asset.isFavorite }
+        screenshots = nonFavorite.filter { $0.asset.mediaSubtypes.contains(.photoScreenshot) }
+            .map { var a = $0; a.isSelected = a.score < 45; return a }
+        videos = nonFavorite.filter { $0.asset.mediaType == .video }
+            .sorted { $0.sizeBytes > $1.sizeBytes }
+            .map { var a = $0; a.isSelected = false; return a }
+        favorites = subset.filter { $0.asset.isFavorite }
+            .map { var a = $0; a.isSelected = false; return a }
+        lowQuality = service.findLowQuality(assets: nonFavorite, qualityMap: qualityMap)
+        behaviorAssets = buildBehaviorAssets(
+            from: nonFavorite,
+            excludingIDs: occupiedAssetIDsForOtherCategories(
+                duplicateGroups: duplicateGroups,
+                similarGroups: similarGroups,
+                screenshots: screenshots,
+                videos: videos,
+                lowQuality: lowQuality
+            )
+        )
+        buildSummary(assets: subset)
+        publishTimelineAssetsDuringScan(
+            scoredAssets: subset,
+            scannedIDs: Set(subset.map(\.id)),
+            elapsedSeconds: elapsedSeconds
+        )
+    }
+
+    private func publishTimelineAssetsDuringScan(
+        scoredAssets: [PhotoAsset],
+        scannedIDs: Set<String>,
+        elapsedSeconds: Int
+    ) {
+        if elapsedSeconds < timelineRevealSeconds {
+            timelineCanShowAssets = false
+            timelineVisibleAssets = []
+            return
+        }
+        timelineCanShowAssets = true
+        timelineVisibleAssets = scoredAssets.filter { scannedIDs.contains($0.id) }
+    }
+
+    private func startMetadataWarmupIfNeeded() {
+        guard metadataWarmupTask == nil else { return }
+        guard phase == .idle, !isBackgroundAnalyzing else { return }
+        metadataWarmupTask = Task(priority: .utility) { [weak self] in
+            guard let self else { return }
+            defer {
+                Task { @MainActor [weak self] in
+                    self?.metadataWarmupTask = nil
+                }
+            }
+            let assets = await self.service.fetchAllAssets()
+            guard !Task.isCancelled, !assets.isEmpty else { return }
+            let hydrated = await self.service.populateFileSizes(for: assets, limit: assets.count)
+            guard !Task.isCancelled else { return }
+            await DatabaseService.shared.upsertAssetMetadata(self.metadataEntries(from: hydrated))
+            let keepIds = Set(hydrated.map(\.id))
+            Task.detached(priority: .background) {
+                await DatabaseService.shared.pruneStaleMetadata(keepIds: keepIds)
+            }
+        }
+    }
+
+    private func performIncrementalLaunchSync() async {
+        guard phase == .idle, !isBackgroundAnalyzing else { return }
+
+        let raw = await service.fetchAllAssets()
+        let currentIDs = Set(raw.map(\.id))
+
+        let activeScannedIDs = await DatabaseService.shared.loadAllActiveScannedIds()
+        let deletedIDs = activeScannedIDs.subtracting(currentIDs)
+        if !deletedIDs.isEmpty {
+            await DatabaseService.shared.markAssetsDeleted(Array(deletedIDs))
+        }
+
+        if currentIDs.isEmpty {
+            await DatabaseService.shared.pruneStaleScores(keepIds: [])
+            await DatabaseService.shared.pruneStaleMetadata(keepIds: [])
+            return
+        }
+
+        Task.detached(priority: .background) {
+            await DatabaseService.shared.pruneStaleScores(keepIds: currentIDs)
+            await DatabaseService.shared.pruneStaleMetadata(keepIds: currentIDs)
+        }
+
+        let scannedExistingIDs = await DatabaseService.shared.loadActiveScannedIds(for: Array(currentIDs))
+        let newIDs = currentIDs.subtracting(scannedExistingIDs)
+        guard !newIDs.isEmpty else { return }
+
+        var newAssets = raw.filter { newIDs.contains($0.id) }
+        var resultsByID: [String: PhotoLibraryService.ScoreResult] = [:]
+
+        for i in newAssets.indices {
+            if Task.isCancelled { return }
+            let result = await service.score(asset: newAssets[i].asset)
+            newAssets[i].score = result.score
+            newAssets[i].isSelected = LibraryViewModel.shouldAutoSelect(
+                score: result.score,
+                hasFaces: result.hasFaces
+            )
+            resultsByID[newAssets[i].id] = result
+        }
+
+        newAssets = await service.populateFileSizes(for: newAssets, limit: newAssets.count)
+
+        let scoreEntries: [DatabaseService.ScoreEntry] = newAssets.compactMap { asset in
+            guard let result = resultsByID[asset.id] else { return nil }
+            return DatabaseService.ScoreEntry(
+                localId: asset.id,
+                score: result.score,
+                isBlurry: result.isBlurry,
+                isOverExposed: result.isOverExposed,
+                isUnderExposed: result.isUnderExposed,
+                hasFaces: result.hasFaces,
+                fileSizeBytes: asset.fileSizeBytes
+            )
+        }
+        await DatabaseService.shared.saveScores(scoreEntries)
+
+        let sizeEntries: [DatabaseService.FileSizeEntry] = newAssets.compactMap { asset in
+            guard let size = asset.fileSizeBytes, size > 0 else { return nil }
+            return DatabaseService.FileSizeEntry(localId: asset.id, fileSizeBytes: size)
+        }
+        await DatabaseService.shared.saveFileSizes(sizeEntries)
+        await DatabaseService.shared.upsertAssetMetadata(metadataEntries(from: newAssets))
+        await DatabaseService.shared.markAssetsScanned(Array(newIDs))
+    }
+
+    private func metadataEntries(from assets: [PhotoAsset]) -> [DatabaseService.AssetMetadataEntry] {
+        assets.map { asset in
+            DatabaseService.AssetMetadataEntry(
+                localId: asset.id,
+                fileSizeBytes: asset.fileSizeBytes,
+                pixelWidth: Int32(asset.asset.pixelWidth),
+                pixelHeight: Int32(asset.asset.pixelHeight),
+                creationTimestamp: asset.asset.creationDate.map { Int64($0.timeIntervalSince1970) }
+            )
+        }
     }
 }
