@@ -748,16 +748,54 @@ class ScanViewModel: ObservableObject {
         }
     }
 
+    // MARK: - Cold photo detection (behavioral signals)
+    //
+    // Uses only signals that are reliable under iCloud Photo Library:
+    //   • creationDate — always accurate, set at capture time
+    //   • hasAdjustments — truly reflects user editing intent
+    //
+    // WHY modificationDate is NOT used:
+    //   iCloud Photo Library silently updates PHAsset.modificationDate during
+    //   metadata sync, library optimization, and shared-album operations.
+    //   In practice almost every asset gets a recent modificationDate regardless
+    //   of whether the user ever touched it, making it useless as a "cold" signal.
+    //
+    // Tiers:
+    //   frozen (🥶): ageYears ≥ 3 && !hasAdjustments
+    //   cold   (❄️): ageYears ≥ 1 && !hasAdjustments  (or ageYears ≥ 5 with edits)
+    private static func computeColdTier(asset: PHAsset) -> ColdTier? {
+        guard let created = asset.creationDate else { return nil }
+        let ageYears = Calendar.current.dateComponents([.year], from: created, to: Date()).year ?? 0
+        guard ageYears >= 1 else { return nil }
+
+        if !asset.hasAdjustments {
+            // Never opened/edited in Photos — the clearest "forgotten" signal
+            return ageYears >= 3 ? .frozen : .cold
+        } else {
+            // User did edit it at some point, but if it's very old it's worth a look
+            return ageYears >= 5 ? .cold : nil
+        }
+    }
+
     private func buildBehaviorAssets(from nonFavoriteAssets: [PhotoAsset], excludingIDs: Set<String>) -> [PhotoAsset] {
         nonFavoriteAssets
             .filter { !excludingIDs.contains($0.id) }
-            .map { asset in
+            .compactMap { asset -> PhotoAsset? in
+                guard let tier = Self.computeColdTier(asset: asset.asset) else { return nil }
                 var a = asset
-                // "其他使用行为" 默认不自动勾选，避免误删。
-                a.isSelected = false
+                a.coldTier = tier
+                // Frozen photos are auto-selected (suggest batch delete);
+                // cold photos require explicit user opt-in.
+                a.isSelected = (tier == .frozen)
                 return a
             }
-            .sorted { $0.creationDate < $1.creationDate }
+            .sorted { lhs, rhs in
+                // Frozen before cold; within same tier, oldest first
+                if lhs.coldTier != rhs.coldTier {
+                    return lhs.coldTier == .frozen
+                }
+                return lhs.creationDate < rhs.creationDate
+            }
     }
 
     private func occupiedAssetIDsForOtherCategories(

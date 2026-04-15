@@ -456,9 +456,9 @@ struct ResultDashboard: View {
                                    size: ByteCountFormatter.string(fromByteCount: vm.lowQuality.reduce(0){$0+$1.sizeBytes}, countStyle: .file)) {
                         navPath.append(.lowQuality)
                     }
-                    SuggestionCard(icon: "clock.arrow.trianglehead.counterclockwise.rotate.90", iconBg: AppColors.amber,
+                    SuggestionCard(icon: "snowflake", iconBg: AppColors.amber,
                                    title: L10n.otherBehavior,
-                                   desc: L10n.behaviorDesc,
+                                   desc: L10n.behaviorDesc(vm.behaviorAssets.filter { $0.coldTier == .frozen }.count),
                                    size: ByteCountFormatter.string(fromByteCount: vm.behaviorAssets.reduce(0){$0+$1.sizeBytes}, countStyle: .file)) {
                         navPath.append(.behavior)
                     }

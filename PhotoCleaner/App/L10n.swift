@@ -128,7 +128,9 @@ enum L10n {
     static var lowQualityPhotos: String { isEn ? "Low Quality Photos" : "低质量照片" }
     static func lowQualityDesc(_ n: Int) -> String { isEn ? "Blurry/Shaky/Exposure/Focus failed \(n)" : "模糊/抖动/曝光/对焦失败 \(n)张" }
     static var otherBehavior: String { isEn ? "Other Behavior" : "其他使用行为" }
-    static var behaviorDesc: String { isEn ? "Never viewed / Long time ago / By year" : "从未查看/很久没看/按年限筛选" }
+    static func behaviorDesc(_ frozenCount: Int) -> String {
+        isEn ? "\(frozenCount) photos untouched for years" : "\(frozenCount) 张照片多年没动过"
+    }
     static var favoritePhotos: String { isEn ? "Favorites" : "收藏照片" }
     static func favoriteDesc(_ n: Int) -> String { isEn ? "\(n) · Not selected by default" : "\(n)张 · 默认不选择" }
 
@@ -325,20 +327,26 @@ enum L10n {
     static var unknownDate: String { isEn ? "Unknown date" : "未知日期" }
     static func lowQualityDone(_ n: Int) -> String { isEn ? "\(n) low quality photos" : "\(n)张低质量照片" }
     static var lowQualityTitle: String { isEn ? "Low Quality" : "低质量照片" }
-    static func lowQualitySubtitle(_ n: Int) -> String { isEn ? "\(n) total · All recommended selected" : "共\(n)张 · 已全选推荐" }
+    static func lowQualitySubtitle(_ total: Int, _ rec: Int) -> String { isEn ? "\(total) · Recommend delete \(rec)" : "\(total)张 · 推荐删 \(rec)张" }
     static func favoritesDone(_ n: Int) -> String { isEn ? "\(n) favorite photos" : "\(n)张收藏照片" }
     static var favoritesTitle: String { isEn ? "Favorites" : "收藏照片" }
     static func favoritesSubtitle(_ n: Int) -> String { isEn ? "\(n) · Not selected by default" : "\(n)张 · 默认不勾选" }
     static var favoriteBanner: String { isEn ? "Favorites not selected by default to avoid accidental deletion" : "收藏照片默认不选，避免误删重要内容" }
     static func photosDone(_ n: Int) -> String { isEn ? "\(n) photos" : "\(n)张照片" }
-    static var behaviorTitle: String { isEn ? "Other Behavior" : "其他使用行为" }
-    static func behaviorSubtitle(_ n: Int) -> String { isEn ? "\(n) · Favorites excluded" : "\(n)张 · 已排除收藏" }
-    static var behaviorNeverViewed: String { isEn ? "Never Viewed" : "从未查看" }
-    static var behaviorLongUnused: String { isEn ? "Long Unused" : "很久没看" }
-    static var behaviorOlder3: String { isEn ? "Over 3 Years" : "超过3年" }
-    static var behaviorOlder5: String { isEn ? "Over 5 Years" : "超过5年" }
-    static var behaviorNeverViewedBanner: String { isEn ? "iOS does not provide 'Never Viewed' data, this filter is unavailable" : "iOS 暂不提供\u{201C}从未查看\u{201D}公开数据，本筛选暂不可用" }
-    static var behaviorBanner: String { isEn ? "Filter by behavior and time, adjust deletion targets manually" : "按使用行为与时间筛选，可手动调整删除对象" }
+    static var behaviorTitle: String { isEn ? "Cold Photos" : "冷照片" }
+    static func behaviorSubtitle(_ frozen: Int, _ cold: Int) -> String {
+        isEn ? "\(frozen) frozen · \(cold) cold" : "🥶 \(frozen) 张极冷 · ❄️ \(cold) 张冷"
+    }
+    static func behaviorInsightBanner(_ frozenCount: Int, _ maxYears: Int) -> String {
+        isEn
+            ? "These \(frozenCount) photos haven't been touched for \(maxYears)+ years."
+            : "这 \(frozenCount) 张照片你已经 \(maxYears) 年没碰过了，是清理的好起点。"
+    }
+    static var behaviorColdBanner: String { isEn ? "Lightly touched — review before deciding." : "偶尔有过操作，建议浏览后再决定。" }
+    static var coldTierFrozen: String { isEn ? "Frozen" : "极冷" }
+    static var coldTierCold: String { isEn ? "Cold" : "冷" }
+    static var coldTierFrozenDetail: String { isEn ? "Never edited · Untouched for years" : "从没编辑过 · 多年没动过" }
+    static var coldTierColdDetail: String { isEn ? "Rarely touched" : "基本没碰过" }
     static var markedDeleteToggle: String { isEn ? "Marked for delete · Tap again to cancel" : "已标记删除 · 再次点击取消" }
     static var markDelete: String { isEn ? "Mark Delete" : "标记删除" }
 
@@ -365,6 +373,14 @@ enum L10n {
     static func folderInfo(_ count: Int, _ title: String) -> String { isEn ? "\(count) · \(title)" : "\(count)张 · \(title)" }
     static func belowThreshold(_ n: Int) -> String { isEn ? "Photos below \(n) are pre-marked, tap to toggle" : "低于 \(n) 分的照片已默认标记，点击可切换" }
     static func dayDetailSubtitle(_ count: Int, _ size: String, _ avg: Int) -> String { isEn ? "\(count) · \(size) · Avg \(avg)" : "\(count)张 · \(size) · 均分\(avg)" }
+    static var deleteNow: String { isEn ? "Delete Now" : "立即删除" }
+    static func timelineLongPressDeleteSingleConfirm(_ size: String) -> String {
+        if isEn {
+            return "Delete this photo (\(size))?\n\(deleteAlertMessage)"
+        } else {
+            return "确认删除这张照片（\(size)）？\n\(deleteAlertMessage)"
+        }
+    }
     static var infoSize: String { isEn ? "Size" : "大小" }
     static var infoFormat: String { isEn ? "Format" : "格式" }
     static var infoTime: String { isEn ? "Time" : "时间" }

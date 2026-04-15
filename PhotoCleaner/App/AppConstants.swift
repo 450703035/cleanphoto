@@ -209,10 +209,6 @@ enum AppConfig {
         get { UserDefaults.standard.object(forKey: "autoSelect") as? Bool ?? true }
         set { UserDefaults.standard.set(newValue, forKey: "autoSelect") }
     }
-    static var timeWeight: Bool {
-        get { UserDefaults.standard.object(forKey: "timeWeight") as? Bool ?? true }
-        set { UserDefaults.standard.set(newValue, forKey: "timeWeight") }
-    }
     static var protectFaces: Bool {
         get { UserDefaults.standard.object(forKey: "protectFaces") as? Bool ?? true }
         set { UserDefaults.standard.set(newValue, forKey: "protectFaces") }
@@ -240,21 +236,27 @@ enum ScoringConfig {
     static let minScore = 5
     static let maxScore = 99
 
-    // Blur thresholds (Laplacian variance)
+    // Blur thresholds (texture-aware Laplacian variance, edge pixels only)
     static let blurSevereThreshold = 60.0
     static let blurSlightThreshold = 180.0
     static let blurSharpThreshold = 500.0
 
-    // Exposure thresholds (luma 0...255)
-    static let underExposureThreshold = 35.0
-    static let overExposureThreshold = 215.0
-    static let goodExposureLowerBound = 55.0
-    static let goodExposureUpperBound = 200.0
+    // Exposure thresholds (histogram dark/bright pixel ratios, 0–1)
+    // "Very dark" = luma < 10;  "very bright" = luma > 245
+    static let underExposedDarkRatio: Double   = 0.50  // >50% very-dark  → under-exposed
+    static let overExposedBrightRatio: Double  = 0.30  // >30% very-bright → over-exposed
+    static let bothExtremesDarkMin: Double     = 0.30  // high-contrast scene: don't penalise
+    static let bothExtremesBrightMin: Double   = 0.20
+    static let goodExposureDarkMax: Double     = 0.15
+    static let goodExposureBrightMax: Double   = 0.10
 
-    // Score weights
+    // Score weights — faces
+    static let multiFaceBonus    = 28    // ≥2 high-quality faces
+    static let singleFaceBonus   = 18    // 1 high-quality face
+    static let blurryFacePenalty = -15   // face detected but quality < 0.3
+
+    // Score weights — other content
     static let favoriteBonus = 40
-    static let multiFaceBonus = 28
-    static let singleFaceBonus = 18
     static let petBonus = 10
 
     static let screenshotPenalty = 22
@@ -270,9 +272,6 @@ enum ScoringConfig {
     static let goodExposureBonus = 8
 
     static let shortVideoPenalty = 12
-    static let maxAgePenalty = 12
-    static let agePenaltyStartYears = 5
-    static let agePenaltyPerYear = 2
 
     // Other score-related
     static let lowQualityThreshold = 35

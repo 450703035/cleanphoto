@@ -112,7 +112,7 @@ struct ToolCard: View {
                     isHighlighted ? AppColors.lightPurple.opacity(0.65) : AppColors.subtleBorder,
                     lineWidth: isHighlighted ? 1 : AppShape.borderWidth
                 )
-            )
+             )
         }
         .buttonStyle(.plain)
         .contentShape(RoundedRectangle(cornerRadius: AppShape.cardRadius))

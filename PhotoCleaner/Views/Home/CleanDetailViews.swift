@@ -13,6 +13,7 @@ struct DuplicatesView: View {
     @State private var deleting = false
     @State private var mergingGroupIDs: Set<UUID> = []
     @State private var viewerRequest: DuplicateViewerRequest? = nil
+    @State private var showBanner = true
     @Environment(\.dismiss) var dismiss
 
     var deletableCount: Int { groups.reduce(0) { $0 + $1.assets.dropFirst().count } }
@@ -32,9 +33,17 @@ struct DuplicatesView: View {
                     SubScreenHeader(title: L10n.duplicateAndSimilarTitle,
                                     subtitle: L10n.groups(groups.count),
                                     onBack: { dismiss() })
-                    InfoBanner(text: L10n.cancelMergeHint, color: AppColors.amber)
+                    if showBanner {
+                        InfoBanner(text: L10n.cancelMergeHint, color: AppColors.amber)
+                            .transition(.opacity.combined(with: .move(edge: .top)))
+                    }
 
                     ScrollView {
+                        Color.clear.frame(height: 0)
+                            .background(GeometryReader { geo in
+                                Color.clear.preference(key: BannerScrollOffsetKey.self,
+                                    value: geo.frame(in: .named("dupScroll")).minY)
+                            })
                         LazyVStack(spacing: 16) {
                             ForEach(groups) { group in
                                 SwipeCancelMergeGroupCard(onCancel: { cancelGroup(group.id) }) {
@@ -55,6 +64,14 @@ struct DuplicatesView: View {
                         .padding()
                         .padding(.bottom, 80)
                     }
+                    .coordinateSpace(name: "dupScroll")
+                    .onPreferenceChange(BannerScrollOffsetKey.self) { offset in
+                        guard showBanner, offset < -10 else { return }
+                        withAnimation(.easeInOut(duration: 0.25)) {
+                            showBanner = false
+                        }
+                    }
+                    .simultaneousGesture(bannerHideGesture)
                 }
                 .background(AppColors.darkBG)
 
@@ -82,6 +99,16 @@ struct DuplicatesView: View {
                 FullScreenPhotoViewer(assets: binding, startIndex: request.startIndex)
             }
         }
+    }
+
+    private var bannerHideGesture: some Gesture {
+        DragGesture(minimumDistance: 6)
+            .onChanged { value in
+                guard showBanner, value.translation.height < -8 else { return }
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    showBanner = false
+                }
+            }
     }
 
     private func merge(_ group: PhotoGroup) {
@@ -340,43 +367,60 @@ struct ScreenshotCleanView: View {
     @State private var viewerRequest: ScreenshotViewerRequest? = nil
     @State private var gridColumnCount: Int = AppConfig.screenshotGridColumns
     @State private var done = false
+    @State private var doneCount = 0
     @State private var deleting = false
+    @State private var showBanner = true
     @Environment(\.dismiss) var dismiss
 
     private var cols: [GridItem] {
         Array(repeating: GridItem(.flexible(), spacing: 3), count: gridColumnCount)
     }
-    private var selected: [PhotoAsset] { assets.filter { $0.isSelected } }
     private var filteredIndices: [Int] {
         assets.indices.filter { idx in
             guard let c = filterCategory else { return true }
             return categoryMap[assets[idx].id] == c
         }
     }
+    private var selectionTargetIndices: [Int] { filteredIndices }
+    private var currentFilterTotalCount: Int { selectionTargetIndices.count }
+    private var currentFilterRecommendedCount: Int {
+        selectionTargetIndices.reduce(0) { partial, idx in
+            partial + (assets[idx].score < 45 ? 1 : 0)
+        }
+    }
+    private var selectedInCurrentFilter: [PhotoAsset] {
+        selectionTargetIndices.compactMap { idx in
+            guard assets.indices.contains(idx), assets[idx].isSelected else { return nil }
+            return assets[idx]
+        }
+    }
     private var isAllSelected: Bool {
-        !assets.isEmpty && assets.allSatisfy { $0.isSelected }
+        !selectionTargetIndices.isEmpty && selectionTargetIndices.allSatisfy { assets[$0].isSelected }
     }
 
     var body: some View {
         ZStack(alignment: .bottom) {
             if done {
-                DoneView(count: selected.count, label: L10n.screenshotsDone(selected.count)) { dismiss() }
+                DoneView(count: doneCount, label: L10n.screenshotsDone(doneCount)) { dismiss() }
             } else {
                 VStack(spacing: 0) {
                     SubScreenHeader(
                         title: L10n.screenshotTitle,
-                        subtitle: L10n.screenshotSubtitle(assets.count, assets.filter { $0.score < 45 }.count),
+                        subtitle: L10n.screenshotSubtitle(currentFilterTotalCount, currentFilterRecommendedCount),
                         onBack: { dismiss() },
                         trailing: AnyView(
                             Button(isAllSelected ? L10n.deselectAll : L10n.selectAll) {
                                 let next = !isAllSelected
-                                for i in assets.indices { assets[i].isSelected = next }
+                                for i in selectionTargetIndices { assets[i].isSelected = next }
                             }
                             .foregroundColor(AppColors.lightPurple).font(AppTypography.body)
                         )
                     )
 
-                    InfoBanner(text: L10n.autoSelectedLow, color: AppColors.red)
+                    if showBanner {
+                        InfoBanner(text: L10n.autoSelectedLow, color: AppColors.red)
+                            .transition(.opacity.combined(with: .move(edge: .top)))
+                    }
 
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 8) {
@@ -401,6 +445,11 @@ struct ScreenshotCleanView: View {
                     }
 
                     ScrollView {
+                        Color.clear.frame(height: 0)
+                            .background(GeometryReader { geo in
+                                Color.clear.preference(key: BannerScrollOffsetKey.self,
+                                    value: geo.frame(in: .named("screenshotScroll")).minY)
+                            })
                         LazyVGrid(columns: cols, spacing: 3) {
                             ForEach(filteredIndices, id: \.self) { idx in
                                 ScreenshotGridCell(
@@ -415,19 +464,34 @@ struct ScreenshotCleanView: View {
                         .padding(3)
                         .padding(.bottom, 80)
                     }
+                    .coordinateSpace(name: "screenshotScroll")
+                    .onPreferenceChange(BannerScrollOffsetKey.self) { offset in
+                        guard showBanner, offset < -10 else { return }
+                        withAnimation(.easeInOut(duration: 0.25)) {
+                            showBanner = false
+                        }
+                    }
+                    .simultaneousGesture(bannerHideGesture)
                     .simultaneousGesture(gridPinchGesture)
                     .animation(.easeInOut(duration: 0.18), value: gridColumnCount)
                 }
                 .background(AppColors.darkBG)
 
-                if !selected.isEmpty {
+                if !selectedInCurrentFilter.isEmpty {
                     BottomDeleteBar(
-                        count: selected.count,
-                        sizeLabel: ByteCountFormatter.string(fromByteCount: selected.reduce(0){$0+$1.sizeBytes}, countStyle: .file)
+                        count: selectedInCurrentFilter.count,
+                        sizeLabel: ByteCountFormatter.string(fromByteCount: selectedInCurrentFilter.reduce(0){$0+$1.sizeBytes}, countStyle: .file)
                     ) {
                         Task {
+                            let targetIds = Set(selectedInCurrentFilter.map(\.id))
+                            guard !targetIds.isEmpty else { return }
                             deleting = true
-                            try? await vm.deleteSelected(from: assets)
+                            doneCount = targetIds.count
+                            var scopedSelection = assets
+                            for i in scopedSelection.indices {
+                                scopedSelection[i].isSelected = targetIds.contains(scopedSelection[i].id)
+                            }
+                            try? await vm.deleteSelected(from: scopedSelection)
                             deleting = false
                             done = true
                         }
@@ -442,6 +506,16 @@ struct ScreenshotCleanView: View {
         .sheet(item: $viewerRequest) { request in
             FullScreenPhotoViewer(assets: $assets, startIndex: request.startIndex)
         }
+    }
+
+    private var bannerHideGesture: some Gesture {
+        DragGesture(minimumDistance: 6)
+            .onChanged { value in
+                guard showBanner, value.translation.height < -8 else { return }
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    showBanner = false
+                }
+            }
     }
 
     private var gridPinchGesture: some Gesture {
@@ -466,31 +540,62 @@ struct ScreenshotCleanView: View {
     }
 
     private func classifyScreenshots() async {
-        guard categoryMap.isEmpty, !assets.isEmpty else { return }
+        guard !assets.isEmpty else { return }
         assets.sort { lhs, rhs in
             if lhs.score != rhs.score { return lhs.score < rhs.score }
             return lhs.creationDate > rhs.creationDate
         }
-        classifying = true
-        classifyProgress = 0
+
+        let ids = assets.map(\.id)
+        let cachedRows = await DatabaseService.shared.loadScreenshotCategories(for: ids)
+        var cachedMap: [String: ScreenshotCategory] = [:]
+        cachedMap.reserveCapacity(cachedRows.count)
+        for (id, raw) in cachedRows {
+            if let category = ScreenshotCategory(rawValue: raw) {
+                cachedMap[id] = category
+            }
+        }
+        categoryMap = cachedMap
+
         let total = max(assets.count, 1)
+        let missingIndices = assets.indices.filter { categoryMap[assets[$0].id] == nil }
+        guard !missingIndices.isEmpty else {
+            classifyProgress = 1
+            classifying = false
+            return
+        }
+
+        classifying = true
+        classifyProgress = Double(categoryMap.count) / Double(total)
+
         var pendingMap: [String: ScreenshotCategory] = [:]
+        var pendingEntries: [DatabaseService.ScreenshotCategoryEntry] = []
         var lastCommitAt = Date.distantPast
         let commitStride = 20
         let commitInterval: TimeInterval = 0.25
-        for (idx, item) in assets.enumerated() {
+
+        let cachedCount = categoryMap.count
+        var classifiedCount = 0
+        for idx in missingIndices {
+            let item = assets[idx]
             let c = await PhotoLibraryService.shared.classifyScreenshot(item.asset)
             pendingMap[item.id] = c
+            pendingEntries.append(.init(localId: item.id, categoryRawValue: c.rawValue))
 
-            let done = idx + 1
+            classifiedCount += 1
+            let done = cachedCount + classifiedCount
             let now = Date()
-            let reachedStride = done % commitStride == 0
+            let reachedStride = classifiedCount % commitStride == 0
             let reachedInterval = now.timeIntervalSince(lastCommitAt) >= commitInterval
             let finished = done == total
             if reachedStride || reachedInterval || finished {
                 if !pendingMap.isEmpty {
                     categoryMap.merge(pendingMap) { _, new in new }
                     pendingMap.removeAll(keepingCapacity: true)
+                }
+                if !pendingEntries.isEmpty {
+                    await DatabaseService.shared.saveScreenshotCategories(pendingEntries)
+                    pendingEntries.removeAll(keepingCapacity: true)
                 }
                 classifyProgress = Double(done) / Double(total)
                 lastCommitAt = now
@@ -500,6 +605,9 @@ struct ScreenshotCleanView: View {
 
         if !pendingMap.isEmpty {
             categoryMap.merge(pendingMap) { _, new in new }
+        }
+        if !pendingEntries.isEmpty {
+            await DatabaseService.shared.saveScreenshotCategories(pendingEntries)
         }
         classifyProgress = 1
         classifying = false
@@ -513,6 +621,7 @@ struct VideoCleanView: View {
     @State private var done = false
     @State private var deleting = false
     @State private var playingAssetID: String? = nil
+    @State private var showBanner = true
     @Environment(\.dismiss) var dismiss
 
     private var selected: [PhotoAsset] { assets.filter { $0.isSelected } }
@@ -537,13 +646,21 @@ struct VideoCleanView: View {
                             .font(AppTypography.body)
                         )
                     )
-                    InfoBanner(text: L10n.videoBanner, color: AppColors.amber)
+                    if showBanner {
+                        InfoBanner(text: L10n.videoBanner, color: AppColors.amber)
+                            .transition(.opacity.combined(with: .move(edge: .top)))
+                    }
 
                     GeometryReader { geo in
                         let colWidth = max(120, (geo.size.width - 34) / 2)
                         let columns = waterfallColumns(itemWidth: colWidth)
 
                         ScrollView {
+                            Color.clear.frame(height: 0)
+                                .background(GeometryReader { g in
+                                    Color.clear.preference(key: BannerScrollOffsetKey.self,
+                                        value: g.frame(in: .named("videoScroll")).minY)
+                                })
                             HStack(alignment: .top, spacing: 10) {
                                 LazyVStack(spacing: 12) {
                                     ForEach(columns.left, id: \.self) { idx in
@@ -588,6 +705,14 @@ struct VideoCleanView: View {
                             .padding(.top, 10)
                             .padding(.bottom, selected.isEmpty ? 20 : 90)
                         }
+                        .coordinateSpace(name: "videoScroll")
+                        .onPreferenceChange(BannerScrollOffsetKey.self) { offset in
+                            guard showBanner, offset < -10 else { return }
+                            withAnimation(.easeInOut(duration: 0.25)) {
+                                showBanner = false
+                            }
+                        }
+                        .simultaneousGesture(bannerHideGesture)
                     }
                 }
                 .background(AppColors.darkBG)
@@ -616,6 +741,16 @@ struct VideoCleanView: View {
             playingAssetID = nil
             vm.setDetailInteraction(false)
         }
+    }
+
+    private var bannerHideGesture: some Gesture {
+        DragGesture(minimumDistance: 6)
+            .onChanged { value in
+                guard showBanner, value.translation.height < -8 else { return }
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    showBanner = false
+                }
+            }
     }
 
     private func waterfallColumns(itemWidth: CGFloat) -> (left: [Int], right: [Int]) {
@@ -830,6 +965,7 @@ struct LowQualityCleanView: View {
     @State private var viewerRequest: LowQualityViewerRequest? = nil
     @State private var gridColumnCount: Int = AppConfig.lowQualityGridColumns
     @State private var done = false
+    @State private var doneCount = 0
     @State private var deleting = false
     @Environment(\.dismiss) var dismiss
 
@@ -842,25 +978,37 @@ struct LowQualityCleanView: View {
             return assets[idx].reason == r
         }
     }
-    private var selected: [PhotoAsset] { assets.filter { $0.isSelected } }
+    private var selectionTargetIndices: [Int] { filteredIndices }
+    private var currentFilterTotalCount: Int { selectionTargetIndices.count }
+    private var currentFilterRecommendedCount: Int {
+        selectionTargetIndices.reduce(0) { partial, idx in
+            partial + (assets[idx].score < 45 ? 1 : 0)
+        }
+    }
+    private var selectedInCurrentFilter: [PhotoAsset] {
+        selectionTargetIndices.compactMap { idx in
+            guard assets.indices.contains(idx), assets[idx].isSelected else { return nil }
+            return assets[idx]
+        }
+    }
     private var isAllSelected: Bool {
-        !assets.isEmpty && assets.allSatisfy { $0.isSelected }
+        !selectionTargetIndices.isEmpty && selectionTargetIndices.allSatisfy { assets[$0].isSelected }
     }
 
     var body: some View {
         ZStack(alignment: .bottom) {
             if done {
-                DoneView(count: selected.count, label: L10n.lowQualityDone(selected.count)) { dismiss() }
+                DoneView(count: doneCount, label: L10n.lowQualityDone(doneCount)) { dismiss() }
             } else {
                 VStack(spacing: 0) {
                     SubScreenHeader(
                         title: L10n.lowQualityTitle,
-                        subtitle: L10n.lowQualitySubtitle(assets.count),
+                        subtitle: L10n.lowQualitySubtitle(currentFilterTotalCount, currentFilterRecommendedCount),
                         onBack: { dismiss() },
                         trailing: AnyView(
                             Button(isAllSelected ? L10n.deselectAll : L10n.selectAll) {
                                 let next = !isAllSelected
-                                for i in assets.indices { assets[i].isSelected = next }
+                                for i in selectionTargetIndices { assets[i].isSelected = next }
                             }
                             .foregroundColor(AppColors.lightPurple)
                             .font(AppTypography.body)
@@ -896,11 +1044,18 @@ struct LowQualityCleanView: View {
                 }
                 .background(AppColors.darkBG)
 
-                if !selected.isEmpty {
-                    BottomDeleteBar(count: selected.count, sizeLabel: "") {
+                if !selectedInCurrentFilter.isEmpty {
+                    BottomDeleteBar(count: selectedInCurrentFilter.count, sizeLabel: "") {
                         Task {
+                            let targetIds = Set(selectedInCurrentFilter.map(\.id))
+                            guard !targetIds.isEmpty else { return }
                             deleting = true
-                            try? await vm.deleteSelected(from: assets)
+                            doneCount = targetIds.count
+                            var scopedSelection = assets
+                            for i in scopedSelection.indices {
+                                scopedSelection[i].isSelected = targetIds.contains(scopedSelection[i].id)
+                            }
+                            try? await vm.deleteSelected(from: scopedSelection)
                             deleting = false
                             done = true
                         }
@@ -985,6 +1140,7 @@ struct FavoritesCleanView: View {
     @State private var viewerRequest: FavoritesViewerRequest? = nil
     @State private var done = false
     @State private var deleting = false
+    @State private var showBanner = true
     @Environment(\.dismiss) var dismiss
 
     private var selected: [PhotoAsset] { assets.filter { $0.isSelected } }
@@ -1011,9 +1167,17 @@ struct FavoritesCleanView: View {
                             .font(AppTypography.body)
                         )
                     )
-                    InfoBanner(text: L10n.favoriteBanner, color: AppColors.red)
+                    if showBanner {
+                        InfoBanner(text: L10n.favoriteBanner, color: AppColors.red)
+                            .transition(.opacity.combined(with: .move(edge: .top)))
+                    }
 
                     ScrollView {
+                        Color.clear.frame(height: 0)
+                            .background(GeometryReader { geo in
+                                Color.clear.preference(key: BannerScrollOffsetKey.self,
+                                    value: geo.frame(in: .named("favoritesScroll")).minY)
+                            })
                         LazyVGrid(columns: [GridItem(.flexible(), spacing: 3), GridItem(.flexible(), spacing: 3), GridItem(.flexible(), spacing: 3)], spacing: 3) {
                             ForEach(assets.indices, id: \.self) { idx in
                                 LowQualityGridCell(
@@ -1027,6 +1191,14 @@ struct FavoritesCleanView: View {
                         .padding(3)
                         .padding(.bottom, 80)
                     }
+                    .coordinateSpace(name: "favoritesScroll")
+                    .onPreferenceChange(BannerScrollOffsetKey.self) { offset in
+                        guard showBanner, offset < -10 else { return }
+                        withAnimation(.easeInOut(duration: 0.25)) {
+                            showBanner = false
+                        }
+                    }
+                    .simultaneousGesture(bannerHideGesture)
                 }
                 .background(AppColors.darkBG)
 
@@ -1052,6 +1224,16 @@ struct FavoritesCleanView: View {
         .sheet(item: $viewerRequest) { request in
             FullScreenPhotoViewer(assets: $assets, startIndex: request.startIndex)
         }
+    }
+
+    private var bannerHideGesture: some Gesture {
+        DragGesture(minimumDistance: 6)
+            .onChanged { value in
+                guard showBanner, value.translation.height < -8 else { return }
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    showBanner = false
+                }
+            }
     }
 }
 
@@ -1060,109 +1242,168 @@ private struct FavoritesViewerRequest: Identifiable {
     let startIndex: Int
 }
 
-// MARK: - Behavior-based cleanup
-private enum BehaviorFilter: CaseIterable {
-    case neverViewed
-    case longUnused
-    case olderThan3Years
-    case olderThan5Years
-
-    var title: String {
-        switch self {
-        case .neverViewed: return L10n.behaviorNeverViewed
-        case .longUnused: return L10n.behaviorLongUnused
-        case .olderThan3Years: return L10n.behaviorOlder3
-        case .olderThan5Years: return L10n.behaviorOlder5
-        }
-    }
-}
+// MARK: - Cold photo cleanup (behavioral signals)
 
 struct BehaviorCleanView: View {
     @State var assets: [PhotoAsset]
     @ObservedObject var vm: ScanViewModel
-    @State private var filter: BehaviorFilter = .longUnused
+    @State private var filterTier: ColdTier? = nil   // nil = 全部
     @State private var viewerRequest: BehaviorViewerRequest? = nil
     @State private var done = false
+    @State private var doneCount = 0
     @State private var deleting = false
+    @State private var showBanner = true
     @Environment(\.dismiss) var dismiss
 
-    private var selected: [PhotoAsset] { assets.filter { $0.isSelected } }
+    private let gridCols = [GridItem(.flexible(), spacing: 3),
+                             GridItem(.flexible(), spacing: 3),
+                             GridItem(.flexible(), spacing: 3)]
+
+    private var frozenCount: Int { assets.filter { $0.coldTier == .frozen }.count }
+    private var coldCount:   Int { assets.filter { $0.coldTier == .cold   }.count }
+
     private var filteredIndices: [Int] {
         assets.indices.filter { idx in
-            let years = yearsSinceCreation(assets[idx])
-            switch filter {
-            case .neverViewed:
-                // iOS public API does not expose per-asset view history.
-                return false
-            case .longUnused:
-                return years >= 1
-            case .olderThan3Years:
-                return years >= 3
-            case .olderThan5Years:
-                return years >= 5
-            }
+            guard let tier = filterTier else { return true }
+            return assets[idx].coldTier == tier
+        }
+    }
+    private var selectedInFilter: [PhotoAsset] {
+        filteredIndices.compactMap { idx in
+            assets.indices.contains(idx) && assets[idx].isSelected ? assets[idx] : nil
         }
     }
     private var isAllSelected: Bool {
-        !assets.isEmpty && assets.allSatisfy { $0.isSelected }
+        !filteredIndices.isEmpty && filteredIndices.allSatisfy { assets[$0].isSelected }
+    }
+
+    // Oldest age among currently visible photos (for banner)
+    private var maxVisibleYears: Int {
+        filteredIndices.compactMap { idx in
+            Calendar.current.dateComponents([.year], from: assets[idx].creationDate, to: Date()).year
+        }.max() ?? 0
+    }
+
+    private var bannerText: String {
+        switch filterTier {
+        case .frozen:
+            let n = filteredIndices.count
+            return maxVisibleYears > 0
+                ? L10n.behaviorInsightBanner(n, maxVisibleYears)
+                : L10n.coldTierFrozenDetail
+        case .cold:
+            return L10n.behaviorColdBanner
+        case nil:
+            let n = frozenCount
+            return n > 0 && maxVisibleYears > 0
+                ? L10n.behaviorInsightBanner(n, maxVisibleYears)
+                : L10n.behaviorColdBanner
+        }
+    }
+    private var bannerColor: Color {
+        filterTier == .cold ? AppColors.blue : AppColors.amber
     }
 
     var body: some View {
         ZStack(alignment: .bottom) {
             if done {
-                DoneView(count: selected.count, label: L10n.photosDone(selected.count)) { dismiss() }
+                DoneView(count: doneCount, label: L10n.photosDone(doneCount)) { dismiss() }
             } else {
                 VStack(spacing: 0) {
                     SubScreenHeader(
                         title: L10n.behaviorTitle,
-                        subtitle: L10n.behaviorSubtitle(assets.count),
+                        subtitle: L10n.behaviorSubtitle(frozenCount, coldCount),
                         onBack: { dismiss() },
                         trailing: AnyView(
                             Button(isAllSelected ? L10n.deselectAll : L10n.selectAll) {
                                 let next = !isAllSelected
-                                for i in assets.indices { assets[i].isSelected = next }
+                                for i in filteredIndices { assets[i].isSelected = next }
                             }
                             .foregroundColor(AppColors.lightPurple)
                             .font(AppTypography.body)
                         )
                     )
-                    InfoBanner(text: filter == .neverViewed ? L10n.behaviorNeverViewedBanner : L10n.behaviorBanner, color: AppColors.amber)
 
+                    if showBanner {
+                        InfoBanner(text: bannerText, color: bannerColor)
+                            .transition(.opacity.combined(with: .move(edge: .top)))
+                    }
+
+                    // ── Filter chips ──────────────────────────────────────────
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 8) {
-                            ForEach(BehaviorFilter.allCases, id: \.self) { f in
-                                FilterChip(label: f.title, isActive: filter == f) { filter = f }
-                            }
+                            FilterChip(
+                                label: L10n.all,
+                                isActive: filterTier == nil
+                            ) { filterTier = nil }
+
+                            FilterChip(
+                                label: "🥶 \(L10n.coldTierFrozen)  \(frozenCount)",
+                                isActive: filterTier == .frozen
+                            ) { filterTier = .frozen }
+
+                            FilterChip(
+                                label: "❄️ \(L10n.coldTierCold)  \(coldCount)",
+                                isActive: filterTier == .cold
+                            ) { filterTier = .cold }
                         }
                         .padding(.horizontal)
-                        .padding(.vertical, 8)
+                        .padding(.top, 8)
                     }
 
+                    // ── Photo grid ────────────────────────────────────────────
                     ScrollView {
-                        LazyVGrid(columns: [GridItem(.flexible(), spacing: 3), GridItem(.flexible(), spacing: 3), GridItem(.flexible(), spacing: 3)], spacing: 3) {
-                            ForEach(filteredIndices, id: \.self) { idx in
-                                LowQualityGridCell(
-                                    asset: $assets[idx],
-                                    onSingleTap: { assets[idx].isSelected.toggle() },
-                                    onDoubleTap: { viewerRequest = BehaviorViewerRequest(startIndex: idx) }
-                                )
-                                .id(assets[idx].id)
+                        Color.clear.frame(height: 0)
+                            .background(GeometryReader { geo in
+                                Color.clear.preference(key: BannerScrollOffsetKey.self,
+                                    value: geo.frame(in: .named("behaviorScroll")).minY)
+                            })
+                        if filteredIndices.isEmpty {
+                            Text("暂无冷照片")
+                                .foregroundColor(AppColors.textSecondary)
+                                .frame(maxWidth: .infinity)
+                                .padding(.top, 60)
+                        } else {
+                            LazyVGrid(columns: gridCols, spacing: 3) {
+                                ForEach(filteredIndices, id: \.self) { idx in
+                                    LowQualityGridCell(
+                                        asset: $assets[idx],
+                                        onSingleTap: { assets[idx].isSelected.toggle() },
+                                        onDoubleTap: { viewerRequest = BehaviorViewerRequest(startIndex: idx) }
+                                    )
+                                    .id(assets[idx].id)
+                                }
                             }
+                            .padding(3)
                         }
-                        .padding(3)
-                        .padding(.bottom, 80)
+                        Spacer().frame(height: selectedInFilter.isEmpty ? 20 : 90)
                     }
+                    .coordinateSpace(name: "behaviorScroll")
+                    .onPreferenceChange(BannerScrollOffsetKey.self) { offset in
+                        guard showBanner, offset < -10 else { return }
+                        withAnimation(.easeInOut(duration: 0.25)) {
+                            showBanner = false
+                        }
+                    }
+                    .simultaneousGesture(bannerHideGesture)
                 }
                 .background(AppColors.darkBG)
 
-                if !selected.isEmpty {
+                if !selectedInFilter.isEmpty {
                     BottomDeleteBar(
-                        count: selected.count,
-                        sizeLabel: ByteCountFormatter.string(fromByteCount: selected.reduce(0){$0+$1.sizeBytes}, countStyle: .file)
+                        count: selectedInFilter.count,
+                        sizeLabel: ByteCountFormatter.string(fromByteCount: selectedInFilter.reduce(0){$0+$1.sizeBytes}, countStyle: .file)
                     ) {
                         Task {
+                            let targetIds = Set(selectedInFilter.map(\.id))
+                            guard !targetIds.isEmpty else { return }
                             deleting = true
-                            try? await vm.deleteSelected(from: assets)
+                            doneCount = targetIds.count
+                            var scopedSelection = assets
+                            for i in scopedSelection.indices {
+                                scopedSelection[i].isSelected = targetIds.contains(scopedSelection[i].id)
+                            }
+                            try? await vm.deleteSelected(from: scopedSelection)
                             deleting = false
                             done = true
                         }
@@ -1179,8 +1420,14 @@ struct BehaviorCleanView: View {
         }
     }
 
-    private func yearsSinceCreation(_ asset: PhotoAsset) -> Int {
-        Calendar.current.dateComponents([.year], from: asset.creationDate, to: Date()).year ?? 0
+    private var bannerHideGesture: some Gesture {
+        DragGesture(minimumDistance: 6)
+            .onChanged { value in
+                guard showBanner, value.translation.height < -8 else { return }
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    showBanner = false
+                }
+            }
     }
 }
 
@@ -1208,6 +1455,11 @@ struct InfoBanner: View {
             .cornerRadius(8)
             .padding(.horizontal).padding(.top, 6)
     }
+}
+
+private struct BannerScrollOffsetKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
 }
 
 struct FilterChip: View {

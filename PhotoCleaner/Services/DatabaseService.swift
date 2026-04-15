@@ -80,6 +80,12 @@ final class DatabaseService: @unchecked Sendable {
                 updated_at       INTEGER NOT NULL
             );
             CREATE INDEX IF NOT EXISTS idx_asset_metadata_updated ON asset_metadata(updated_at);
+            CREATE TABLE IF NOT EXISTS screenshot_categories (
+                local_id    TEXT PRIMARY KEY,
+                category    TEXT NOT NULL,
+                updated_at  INTEGER NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_screenshot_categories_category ON screenshot_categories(category);
         """, nil, nil, nil)
 
         // Safe migrations: only add missing columns (prevents duplicate-column errors on relaunch).
@@ -330,6 +336,84 @@ final class DatabaseService: @unchecked Sendable {
 
     func saveFileSizes(_ entries: [FileSizeEntry]) async {
         await run { self._saveFileSizes(entries) }
+    }
+
+    // MARK: - Screenshot Categories
+
+    struct ScreenshotCategoryEntry: Sendable {
+        let localId: String
+        let categoryRawValue: String
+    }
+
+    func loadScreenshotCategories(for ids: [String]) async -> [String: String] {
+        await run { self._loadScreenshotCategories(for: ids) }
+    }
+
+    private func _loadScreenshotCategories(for ids: [String]) -> [String: String] {
+        guard !ids.isEmpty else { return [:] }
+        var output: [String: String] = [:]
+        let chunkSize = 500
+        var offset = 0
+        while offset < ids.count {
+            let chunk = Array(ids[offset..<min(offset + chunkSize, ids.count)])
+            let placeholders = chunk.map { _ in "?" }.joined(separator: ",")
+            let sql = """
+                SELECT local_id, category
+                FROM screenshot_categories
+                WHERE local_id IN (\(placeholders))
+            """
+            var stmt: OpaquePointer?
+            if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
+                for (i, id) in chunk.enumerated() {
+                    sqlite3_bind_text(stmt, Int32(i + 1), id, -1, SQLITE_TRANSIENT)
+                }
+                while sqlite3_step(stmt) == SQLITE_ROW {
+                    let id = String(cString: sqlite3_column_text(stmt, 0))
+                    let category = String(cString: sqlite3_column_text(stmt, 1))
+                    output[id] = category
+                }
+                sqlite3_finalize(stmt)
+            }
+            offset += chunkSize
+        }
+        return output
+    }
+
+    func saveScreenshotCategories(_ entries: [ScreenshotCategoryEntry]) async {
+        await run { self._saveScreenshotCategories(entries) }
+    }
+
+    private func _saveScreenshotCategories(_ entries: [ScreenshotCategoryEntry]) {
+        guard !entries.isEmpty else { return }
+        let sql = """
+            INSERT INTO screenshot_categories (local_id, category, updated_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(local_id) DO UPDATE SET
+                category = excluded.category,
+                updated_at = excluded.updated_at
+        """
+        _ = withTransaction("saveScreenshotCategories") {
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+                logSQLiteError("prepare saveScreenshotCategories")
+                return false
+            }
+            defer { sqlite3_finalize(stmt) }
+
+            let now = Int64(Date().timeIntervalSince1970)
+            for entry in entries {
+                sqlite3_bind_text(stmt, 1, entry.localId, -1, SQLITE_TRANSIENT)
+                sqlite3_bind_text(stmt, 2, entry.categoryRawValue, -1, SQLITE_TRANSIENT)
+                sqlite3_bind_int64(stmt, 3, now)
+                guard sqlite3_step(stmt) == SQLITE_DONE else {
+                    logSQLiteError("step saveScreenshotCategories")
+                    return false
+                }
+                sqlite3_reset(stmt)
+                sqlite3_clear_bindings(stmt)
+            }
+            return true
+        }
     }
 
     private func _saveFileSizes(_ entries: [FileSizeEntry]) {

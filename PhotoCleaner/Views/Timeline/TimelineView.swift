@@ -295,6 +295,9 @@ struct TimelineListView: View {
     @State private var visibleFolderKeys: Set<String> = []
     @State private var preheatedAssetsByID: [String: PHAsset] = [:]
     @State private var lastReportedNearTail = false
+    @State private var pendingDeleteAsset: PhotoAsset? = nil
+    @State private var showLongPressDeleteAlert = false
+    @State private var deleting = false
     private let preheatPaddingFolders = 18
     private let nearTailThresholdFolders = 1
     private let cols = [
@@ -371,6 +374,7 @@ struct TimelineListView: View {
                                             folder: folder,
                                             onTap: { onFolderTap(folder) },
                                             onLongPress: {},
+                                            onAssetLongPress: { asset in requestDeleteAsset(asset) },
                                             onVisible: { markFolderVisible(folderKey) },
                                             onHidden: { markFolderHidden(folderKey) }
                                         )
@@ -441,6 +445,24 @@ struct TimelineListView: View {
             visibleFolderKeys.removeAll()
             setNearTail(false)
         }
+        .alert(L10n.allowDeleteTitle, isPresented: $showLongPressDeleteAlert, presenting: pendingDeleteAsset) { asset in
+            Button(L10n.cancel, role: .cancel) {
+                pendingDeleteAsset = nil
+            }
+            Button(L10n.deleteNow, role: .destructive) {
+                deleteAsset(asset)
+            }
+        } message: { asset in
+            Text(L10n.timelineLongPressDeleteSingleConfirm(asset.formattedSize))
+        }
+        .overlay(
+            deleting
+            ? ProgressView(L10n.deleting)
+                .padding(20)
+                .background(AppColors.cardBG)
+                .cornerRadius(12)
+            : nil
+        )
     }
 
     private var preheatTargetSize: CGSize {
@@ -551,6 +573,23 @@ struct TimelineListView: View {
         lastReportedNearTail = nearTail
         onTailVisibilityChange(nearTail)
     }
+
+    private func requestDeleteAsset(_ asset: PhotoAsset) {
+        pendingDeleteAsset = asset
+        showLongPressDeleteAlert = true
+    }
+
+    private func deleteAsset(_ asset: PhotoAsset) {
+        Task {
+            deleting = true
+            defer {
+                deleting = false
+                pendingDeleteAsset = nil
+            }
+            try? await PhotoStore.shared.deleteAssets([asset])
+        }
+    }
+
 }
 
 // MARK: - Waterfall view
@@ -566,6 +605,8 @@ struct TimelineWaterfallView: View {
     @State private var layoutRebuildTask: Task<Void, Never>? = nil
     @State private var viewerRequest: PhotoViewerRequest? = nil
     @State private var deleting = false
+    @State private var pendingDeleteAsset: PhotoAsset? = nil
+    @State private var showLongPressDeleteAlert = false
     @State private var playingVideoAssetID: String? = nil
 
     private var selected: [PhotoAsset] { assets.filter { $0.isSelected } }
@@ -599,7 +640,7 @@ struct TimelineWaterfallView: View {
                         ForEach(sectionLayouts) { section in
                             Section {
                                 HStack(alignment: .top, spacing: 10) {
-                                    VStack(spacing: 10) {
+                                    LazyVStack(spacing: 10) {
                                         ForEach(section.left, id: \.self) { idx in
                                             if assets.indices.contains(idx) {
                                                 TimelineWaterfallCell(
@@ -615,13 +656,14 @@ struct TimelineWaterfallView: View {
                                                         }
                                                     },
                                                     onVideoSelectToggle: { toggle(index: idx) },
+                                                    onLongPress: { requestDeleteAsset(at: idx) },
                                                     onDoubleTap: { viewerRequest = PhotoViewerRequest(startIndex: idx) }
                                                 )
                                                 .id(assets[idx].id)
                                             }
                                         }
                                     }
-                                    VStack(spacing: 10) {
+                                    LazyVStack(spacing: 10) {
                                         ForEach(section.right, id: \.self) { idx in
                                             if assets.indices.contains(idx) {
                                                 TimelineWaterfallCell(
@@ -637,6 +679,7 @@ struct TimelineWaterfallView: View {
                                                         }
                                                     },
                                                     onVideoSelectToggle: { toggle(index: idx) },
+                                                    onLongPress: { requestDeleteAsset(at: idx) },
                                                     onDoubleTap: { viewerRequest = PhotoViewerRequest(startIndex: idx) }
                                                 )
                                                 .id(assets[idx].id)
@@ -712,6 +755,16 @@ struct TimelineWaterfallView: View {
         .sheet(item: $viewerRequest) { request in
             FullScreenPhotoViewer(assets: $assets, startIndex: request.startIndex)
         }
+        .alert(L10n.allowDeleteTitle, isPresented: $showLongPressDeleteAlert, presenting: pendingDeleteAsset) { asset in
+            Button(L10n.cancel, role: .cancel) {
+                pendingDeleteAsset = nil
+            }
+            Button(L10n.deleteNow, role: .destructive) {
+                deleteAsset(asset)
+            }
+        } message: { asset in
+            Text(L10n.timelineLongPressDeleteSingleConfirm(asset.formattedSize))
+        }
     }
 
     private func syncFromViewModel() {
@@ -734,6 +787,23 @@ struct TimelineWaterfallView: View {
         guard assets.indices.contains(index) else { return }
         assets[index].isSelected.toggle()
         vm.selectionOverrides[assets[index].id] = assets[index].isSelected
+    }
+
+    private func requestDeleteAsset(at index: Int) {
+        guard assets.indices.contains(index) else { return }
+        pendingDeleteAsset = assets[index]
+        showLongPressDeleteAlert = true
+    }
+
+    private func deleteAsset(_ asset: PhotoAsset) {
+        Task {
+            deleting = true
+            defer {
+                deleting = false
+                pendingDeleteAsset = nil
+            }
+            try? await PhotoStore.shared.deleteAssets([asset])
+        }
     }
 
     private func updateLayoutWidthIfNeeded(_ width: CGFloat, force: Bool = false) {
@@ -844,6 +914,7 @@ private struct TimelineWaterfallCell: View {
     let onPhotoTap: () -> Void
     let onVideoPlayToggle: () -> Void
     let onVideoSelectToggle: () -> Void
+    let onLongPress: () -> Void
     let onDoubleTap: () -> Void
     @State private var player: AVPlayer?
     @State private var loadingPlayer = false
@@ -890,6 +961,7 @@ private struct TimelineWaterfallCell: View {
                     onPhotoTap()
                 }
             }
+            .onLongPressGesture(minimumDuration: 0.6, perform: onLongPress)
 
             HStack(alignment: .center, spacing: 8) {
                 VStack(alignment: .leading, spacing: 2) {
@@ -1189,26 +1261,41 @@ struct DayCellView: View {
     let isToday: Bool
     let maxDaySize: Int64
     let onTap: (DayInfo) -> Void
+    @Environment(\.colorScheme) private var colorScheme
 
-    private var heatIntensity: Double {
-        guard let info = info, maxDaySize > 0 else { return 0 }
-        return min(Double(info.totalSize) / Double(maxDaySize), 1.0)
+    private var hasPhotoData: Bool { info != nil }
+
+    // Background: match the warm pink/coral palette from the reference calendar.
+    // Light mode: soft pink for small → salmon for medium → coral for large.
+    // Dark mode: muted warm tones that sit on the dark surface.
+    private static let bgSmall  = Color(lightHex: "FFF3F2", darkHex: "201414")
+    private static let bgMedium = Color(lightHex: "FFE4E1", darkHex: "2D1616")
+    private static let bgLarge  = Color(lightHex: "FF3B30", darkHex: "FF453A")
+
+    private var dayBackgroundColor: Color {
+        guard let size = info?.totalSize else { return .clear }
+        let mb100: Int64 = 100 * 1024 * 1024
+        let gb1: Int64 = 1024 * 1024 * 1024
+        if size < mb100 { return Self.bgSmall }
+        if size < gb1   { return Self.bgMedium }
+        return Self.bgLarge
     }
 
-    // 5-level discrete heatmap colors
-    private var heatColor: Color {
-        guard info != nil else { return Color(hex: "F1F3F5") }
-        switch heatIntensity {
-        case 0..<0.2:   return Color(hex: "D3F9D8")
-        case 0.2..<0.5: return Color(hex: "69DB7C")
-        case 0.5..<0.75: return Color(hex: "FFD43B")
-        default:         return Color(hex: "FF6B6B")
-        }
+    private var isLargeTier: Bool {
+        guard let size = info?.totalSize else { return false }
+        return size >= 1024 * 1024 * 1024
     }
 
-    // Light backgrounds need dark text
-    private var textColor: Color { Color(hex: "1a1a2e").opacity(0.75) }
-    private var subTextColor: Color { Color(hex: "1a1a2e").opacity(0.45) }
+    private var dayTextColor: Color {
+        if isToday { return .white }
+        if colorScheme == .light && isLargeTier { return .white }
+        return colorScheme == .light ? .black : .white
+    }
+
+    private var secondaryTextColor: Color {
+        if colorScheme == .light && isLargeTier { return .white.opacity(0.85) }
+        return colorScheme == .light ? Color(hex: "8A8A8F") : Color(hex: "9B9BA3")
+    }
 
     private var dotColor: Color? {
         guard let s = info?.averageScore else { return nil }
@@ -1216,29 +1303,35 @@ struct DayCellView: View {
     }
 
     var body: some View {
-        VStack(spacing: 2) {
-            Text("\(day)")
-                .font(.system(size: 11, weight: .semibold))
-                .frame(width: 20, height: 20)
-                .background(isToday ? AppColors.purple : Color.clear)
-                .foregroundColor(isToday ? .white : textColor)
-                .clipShape(Circle())
+        ZStack(alignment: .topTrailing) {
+            VStack(spacing: 2) {
+                Text("\(day)")
+                    .font(.system(size: 11, weight: .bold))
+                    .frame(width: 20, height: 20)
+                    .background(isToday ? AppColors.purple : Color.clear)
+                    .foregroundColor(dayTextColor)
+                    .clipShape(Circle())
 
-            if let info = info {
-                Text(L10n.dayCount(info.count))
-                    .font(.system(size: 7)).foregroundColor(subTextColor).lineLimit(1)
-                Text(info.formattedSize)
-                    .font(.system(size: 7)).foregroundColor(subTextColor).lineLimit(1)
-                if let c = dotColor { Circle().fill(c).frame(width: 5, height: 5) }
+                if let info = info {
+                    Text(L10n.dayCount(info.count))
+                        .font(.system(size: 7)).foregroundColor(secondaryTextColor).lineLimit(1)
+                    Text(info.formattedSize)
+                        .font(.system(size: 7)).foregroundColor(secondaryTextColor).lineLimit(1)
+                }
+            }
+            .frame(maxWidth: .infinity, minHeight: 52)
+
+            if let c = dotColor {
+                Circle().fill(c).frame(width: 5, height: 5)
+                    .padding(4)
             }
         }
-        .frame(maxWidth: .infinity, minHeight: 52)
-        .background(heatColor)
-        .cornerRadius(8)
-        .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(Color(hex: "1a1a2e").opacity(0.08), lineWidth: 0.5)
-        )
+        .background {
+            if hasPhotoData {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(dayBackgroundColor)
+            }
+        }
         .onTapGesture {
             if let info = info { onTap(info) }
         }
@@ -1254,11 +1347,17 @@ struct AlbumFolderDetailView: View {
     @State private var done = false
     @State private var selectionMode = false
     @State private var viewerRequest: PhotoViewerRequest? = nil
+    @State private var pendingDeleteAsset: PhotoAsset? = nil
+    @State private var showLongPressDeleteAlert = false
+    @State private var deleting = false
     @State private var cellFrames: [Int: CGRect] = [:]
     @State private var dragSelectValue: Bool? = nil
     @State private var dragStartIndex: Int? = nil
     @State private var dragCurrentIndex: Int? = nil
     @State private var dragOriginalSelections: [Int: Bool] = [:]
+    @State private var dragLastLocation: CGPoint? = nil
+    @State private var dragAutoScrollTask: Task<Void, Never>? = nil
+    @State private var dragAutoScrollDirection: DragAutoScrollDirection? = nil
     @Environment(\.dismiss) var dismiss
     private let service = PhotoLibraryService.shared
 
@@ -1298,69 +1397,68 @@ struct AlbumFolderDetailView: View {
                             .padding(.horizontal).padding(.top, 8)
                     }
 
-                    ScrollView {
-                        VStack(spacing: 8) {
-                            if !assets.isEmpty {
-                                LargePhotoCard(
-                                    asset: assets[0], isSelected: $assets[0].isSelected,
-                                    selectionMode: $selectionMode,
-                                    isBest: true,
-                                    onToggle: { syncToggle(index: 0) },
-                                    onView: { viewerRequest = PhotoViewerRequest(startIndex: 0) }
-                                )
-                                .padding(.horizontal)
-                            }
-                            if assets.count > 1 {
-                                LazyVGrid(columns: cols, spacing: 4) {
-                                    ForEach(1..<assets.count, id: \.self) { i in
-                                        SmallPhotoCell(
-                                            asset: assets[i],
-                                            isSelected: $assets[i].isSelected,
-                                            selectionMode: $selectionMode,
-                                            onToggle: { syncToggle(index: i) },
-                                            onView: { viewerRequest = PhotoViewerRequest(startIndex: i) }
-                                        )
-                                        .background(GeometryReader { geo in
-                                            Color.clear.preference(key: GridCellFrame.self,
-                                                value: [i: geo.frame(in: .named("albumGrid"))])
-                                        })
-                                    }
-                                }
-                                .coordinateSpace(name: "albumGrid")
-                                .onPreferenceChange(GridCellFrame.self) { cellFrames = $0 }
-                                .applyIf(selectionMode) {
-                                    $0.simultaneousGesture(
-                                        DragGesture(minimumDistance: 4, coordinateSpace: .named("albumGrid"))
-                                            .onChanged { value in
-                                                if dragSelectValue == nil {
-                                                    guard let start = cellFrames.first(where: { $0.value.contains(value.startLocation) })?.key else { return }
-                                                    dragStartIndex = start
-                                                    dragSelectValue = !assets[start].isSelected
-                                                    dragOriginalSelections = Dictionary(uniqueKeysWithValues: assets.indices.map { ($0, assets[$0].isSelected) })
-                                                }
-                                                guard let startIdx = dragStartIndex, let selectValue = dragSelectValue,
-                                                      let currentIdx = cellFrames.first(where: { $0.value.contains(value.location) })?.key,
-                                                      currentIdx != dragCurrentIndex else { return }
-                                                dragCurrentIndex = currentIdx
-                                                let lo = min(startIdx, currentIdx), hi = max(startIdx, currentIdx)
-                                                for i in assets.indices {
-                                                    let target = (i >= lo && i <= hi) ? selectValue : (dragOriginalSelections[i] ?? assets[i].isSelected)
-                                                    if assets[i].isSelected != target {
-                                                        assets[i].isSelected = target
-                                                        vm.selectionOverrides[assets[i].id] = target
-                                                    }
-                                                }
-                                            }
-                                            .onEnded { _ in
-                                                dragSelectValue = nil; dragStartIndex = nil
-                                                dragCurrentIndex = nil; dragOriginalSelections = [:]
-                                            }
+                    ScrollViewReader { proxy in
+                        ScrollView {
+                            VStack(spacing: 8) {
+                                if !assets.isEmpty {
+                                    LargePhotoCard(
+                                        asset: assets[0], isSelected: $assets[0].isSelected,
+                                        selectionMode: $selectionMode,
+                                        isBest: true,
+                                        onToggle: { syncToggle(index: 0) },
+                                        onView: { viewerRequest = PhotoViewerRequest(startIndex: 0) }
                                     )
+                                    .id(0)
+                                    .onLongPressGesture(minimumDuration: 0.6) {
+                                        guard !selectionMode else { return }
+                                        guard assets.indices.contains(0) else { return }
+                                        requestDeleteAsset(assets[0])
+                                    }
+                                    .background(GeometryReader { geo in
+                                        Color.clear.preference(key: GridCellFrame.self,
+                                            value: [0: geo.frame(in: .global)])
+                                    })
+                                    .padding(.horizontal)
                                 }
-                                .padding(.horizontal)
+                                if assets.count > 1 {
+                                    LazyVGrid(columns: cols, spacing: 4) {
+                                        ForEach(1..<assets.count, id: \.self) { i in
+                                            SmallPhotoCell(
+                                                asset: assets[i],
+                                                isSelected: $assets[i].isSelected,
+                                                selectionMode: $selectionMode,
+                                                onToggle: { syncToggle(index: i) },
+                                                onView: { viewerRequest = PhotoViewerRequest(startIndex: i) }
+                                            )
+                                            .id(i)
+                                            .onLongPressGesture(minimumDuration: 0.6) {
+                                                guard !selectionMode else { return }
+                                                guard assets.indices.contains(i) else { return }
+                                                requestDeleteAsset(assets[i])
+                                            }
+                                            .background(GeometryReader { geo in
+                                                Color.clear.preference(key: GridCellFrame.self,
+                                                    value: [i: geo.frame(in: .global)])
+                                            })
+                                        }
+                                    }
+                                    .onPreferenceChange(GridCellFrame.self) { cellFrames = $0 }
+                                    .applyIf(selectionMode) {
+                                        $0.simultaneousGesture(
+                                            DragGesture(minimumDistance: 4, coordinateSpace: .global)
+                                                .onChanged { value in
+                                                    handleDragChanged(value, proxy: proxy)
+                                                }
+                                                .onEnded { _ in
+                                                    stopDragSelectionAndAutoScroll()
+                                                }
+                                        )
+                                    }
+                                    .padding(.horizontal)
+                                }
                             }
+                            .padding(.top, 8).padding(.bottom, 80)
                         }
-                        .padding(.top, 8).padding(.bottom, 80)
                     }
                 }
                 .background(AppColors.darkBG)
@@ -1377,6 +1475,27 @@ struct AlbumFolderDetailView: View {
         }
         .sheet(item: $viewerRequest) { request in
             FullScreenPhotoViewer(assets: $assets, startIndex: request.startIndex)
+        }
+        .alert(L10n.allowDeleteTitle, isPresented: $showLongPressDeleteAlert, presenting: pendingDeleteAsset) { asset in
+            Button(L10n.cancel, role: .cancel) {
+                pendingDeleteAsset = nil
+            }
+            Button(L10n.deleteNow, role: .destructive) {
+                deleteSingleAsset(asset)
+            }
+        } message: { asset in
+            Text(L10n.timelineLongPressDeleteSingleConfirm(asset.formattedSize))
+        }
+        .overlay(
+            deleting
+            ? ProgressView(L10n.deleting)
+                .padding(24)
+                .background(AppColors.cardBG)
+                .cornerRadius(10)
+            : nil
+        )
+        .onDisappear {
+            stopDragSelectionAndAutoScroll()
         }
     }
 
@@ -1403,6 +1522,141 @@ struct AlbumFolderDetailView: View {
         assets[index].isSelected.toggle()
         vm.selectionOverrides[assets[index].id] = assets[index].isSelected
     }
+
+    private func requestDeleteAsset(_ asset: PhotoAsset) {
+        pendingDeleteAsset = asset
+        showLongPressDeleteAlert = true
+    }
+
+    private func deleteSingleAsset(_ asset: PhotoAsset) {
+        Task {
+            deleting = true
+            defer {
+                deleting = false
+                pendingDeleteAsset = nil
+            }
+            try? await PhotoStore.shared.deleteAssets([asset])
+            vm.selectionOverrides.removeValue(forKey: asset.id)
+            assets.removeAll { $0.id == asset.id }
+            if assets.isEmpty {
+                dismiss()
+            }
+        }
+    }
+
+    private enum DragAutoScrollDirection { case up, down }
+
+    private func handleDragChanged(_ value: DragGesture.Value, proxy: ScrollViewProxy) {
+        if dragSelectValue == nil {
+            guard let start = indexAtDragPoint(value.startLocation) else { return }
+            dragStartIndex = start
+            dragCurrentIndex = start
+            dragSelectValue = !assets[start].isSelected
+            dragOriginalSelections = Dictionary(uniqueKeysWithValues: assets.indices.map { ($0, assets[$0].isSelected) })
+            applyDragSelection(to: start)
+        }
+
+        dragLastLocation = value.location
+        if let current = indexAtDragPoint(value.location) {
+            applyDragSelection(to: current)
+        }
+        updateDragAutoScroll(proxy: proxy)
+    }
+
+    private func applyDragSelection(to currentIdx: Int) {
+        guard let startIdx = dragStartIndex, let selectValue = dragSelectValue else { return }
+        dragCurrentIndex = currentIdx
+        let lo = min(startIdx, currentIdx)
+        let hi = max(startIdx, currentIdx)
+        for i in assets.indices {
+            let target = (i >= lo && i <= hi) ? selectValue : (dragOriginalSelections[i] ?? assets[i].isSelected)
+            if assets[i].isSelected != target {
+                assets[i].isSelected = target
+                vm.selectionOverrides[assets[i].id] = target
+            }
+        }
+    }
+
+    private func indexAtDragPoint(_ point: CGPoint) -> Int? {
+        if let hit = cellFrames.first(where: { $0.value.contains(point) })?.key {
+            return hit
+        }
+        guard !cellFrames.isEmpty else { return nil }
+        guard let minY = cellFrames.values.map(\.minY).min(),
+              let maxY = cellFrames.values.map(\.maxY).max() else { return nil }
+        if point.y < minY { return cellFrames.keys.min() }
+        if point.y > maxY { return cellFrames.keys.max() }
+        return cellFrames.min(by: { abs($0.value.midY - point.y) < abs($1.value.midY - point.y) })?.key
+    }
+
+    // 基于屏幕坐标判断自动滚动方向，而不是内容边界
+    private func dragAutoScrollDirectionForCurrentLocation() -> DragAutoScrollDirection? {
+        guard let point = dragLastLocation else { return nil }
+        let screenHeight = UIScreen.main.bounds.height
+        let topTrigger: CGFloat = 140      // 导航栏/标题栏下方
+        let bottomTrigger: CGFloat = screenHeight - 110  // 底部操作栏上方
+        if point.y <= topTrigger { return .up }
+        if point.y >= bottomTrigger { return .down }
+        return nil
+    }
+
+    private func updateDragAutoScroll(proxy: ScrollViewProxy) {
+        guard dragSelectValue != nil else {
+            stopDragAutoScroll()
+            return
+        }
+        guard let direction = dragAutoScrollDirectionForCurrentLocation() else {
+            stopDragAutoScroll()
+            return
+        }
+        guard dragAutoScrollTask == nil || dragAutoScrollDirection != direction else { return }
+        startDragAutoScroll(direction: direction, proxy: proxy)
+    }
+
+    private func startDragAutoScroll(direction: DragAutoScrollDirection, proxy: ScrollViewProxy) {
+        stopDragAutoScroll()
+        dragAutoScrollDirection = direction
+        dragAutoScrollTask = Task { @MainActor in
+            while !Task.isCancelled, dragSelectValue != nil {
+                guard let liveDirection = dragAutoScrollDirectionForCurrentLocation(),
+                      liveDirection == direction else { break }
+                guard !assets.isEmpty else { break }
+
+                let base = dragCurrentIndex ?? dragStartIndex ?? 0
+                let nextIndex: Int
+                switch direction {
+                case .up: nextIndex = max(0, base - 3)
+                case .down: nextIndex = min(assets.count - 1, base + 3)
+                }
+                guard nextIndex != base else { break }
+
+                applyDragSelection(to: nextIndex)
+                withAnimation(.linear(duration: 0.15)) {
+                    proxy.scrollTo(nextIndex, anchor: direction == .down ? .bottom : .top)
+                }
+                try? await Task.sleep(nanoseconds: 150_000_000)
+            }
+            if !Task.isCancelled {
+                dragAutoScrollDirection = nil
+                dragAutoScrollTask = nil
+            }
+        }
+    }
+
+    private func stopDragAutoScroll() {
+        dragAutoScrollTask?.cancel()
+        dragAutoScrollTask = nil
+        dragAutoScrollDirection = nil
+    }
+
+    private func stopDragSelectionAndAutoScroll() {
+        stopDragAutoScroll()
+        dragSelectValue = nil
+        dragStartIndex = nil
+        dragCurrentIndex = nil
+        dragOriginalSelections = [:]
+        dragLastLocation = nil
+    }
 }
 
 // MARK: - Day photo detail
@@ -1414,11 +1668,17 @@ struct DayPhotoDetailView: View {
     @State private var done = false
     @State private var selectionMode = false
     @State private var viewerRequest: PhotoViewerRequest? = nil
+    @State private var pendingDeleteAsset: PhotoAsset? = nil
+    @State private var showLongPressDeleteAlert = false
+    @State private var deleting = false
     @State private var cellFrames: [Int: CGRect] = [:]
     @State private var dragSelectValue: Bool? = nil
     @State private var dragStartIndex: Int? = nil
     @State private var dragCurrentIndex: Int? = nil
     @State private var dragOriginalSelections: [Int: Bool] = [:]
+    @State private var dragLastLocation: CGPoint? = nil
+    @State private var dragAutoScrollTask: Task<Void, Never>? = nil
+    @State private var dragAutoScrollDirection: DragAutoScrollDirection? = nil
     @Environment(\.dismiss) var dismiss
     private let service = PhotoLibraryService.shared
     private let cols = [
@@ -1461,69 +1721,68 @@ struct DayPhotoDetailView: View {
                             .padding(.horizontal).padding(.top, 8)
                     }
 
-                    ScrollView {
-                        VStack(spacing: 8) {
-                            if !assets.isEmpty {
-                                LargePhotoCard(
-                                    asset: assets[0], isSelected: $assets[0].isSelected,
-                                    selectionMode: $selectionMode,
-                                    isBest: true,
-                                    onToggle: { syncToggle(index: 0) },
-                                    onView: { viewerRequest = PhotoViewerRequest(startIndex: 0) }
-                                )
-                                .padding(.horizontal)
-                            }
-                            if assets.count > 1 {
-                                LazyVGrid(columns: cols, spacing: 4) {
-                                    ForEach(1..<assets.count, id: \.self) { i in
-                                        SmallPhotoCell(
-                                            asset: assets[i],
-                                            isSelected: $assets[i].isSelected,
-                                            selectionMode: $selectionMode,
-                                            onToggle: { syncToggle(index: i) },
-                                            onView: { viewerRequest = PhotoViewerRequest(startIndex: i) }
-                                        )
-                                        .background(GeometryReader { geo in
-                                            Color.clear.preference(key: GridCellFrame.self,
-                                                value: [i: geo.frame(in: .named("dayGrid"))])
-                                        })
-                                    }
-                                }
-                                .coordinateSpace(name: "dayGrid")
-                                .onPreferenceChange(GridCellFrame.self) { cellFrames = $0 }
-                                .applyIf(selectionMode) {
-                                    $0.simultaneousGesture(
-                                        DragGesture(minimumDistance: 4, coordinateSpace: .named("dayGrid"))
-                                            .onChanged { value in
-                                                if dragSelectValue == nil {
-                                                    guard let start = cellFrames.first(where: { $0.value.contains(value.startLocation) })?.key else { return }
-                                                    dragStartIndex = start
-                                                    dragSelectValue = !assets[start].isSelected
-                                                    dragOriginalSelections = Dictionary(uniqueKeysWithValues: assets.indices.map { ($0, assets[$0].isSelected) })
-                                                }
-                                                guard let startIdx = dragStartIndex, let selectValue = dragSelectValue,
-                                                      let currentIdx = cellFrames.first(where: { $0.value.contains(value.location) })?.key,
-                                                      currentIdx != dragCurrentIndex else { return }
-                                                dragCurrentIndex = currentIdx
-                                                let lo = min(startIdx, currentIdx), hi = max(startIdx, currentIdx)
-                                                for i in assets.indices {
-                                                    let target = (i >= lo && i <= hi) ? selectValue : (dragOriginalSelections[i] ?? assets[i].isSelected)
-                                                    if assets[i].isSelected != target {
-                                                        assets[i].isSelected = target
-                                                        vm.selectionOverrides[assets[i].id] = target
-                                                    }
-                                                }
-                                            }
-                                            .onEnded { _ in
-                                                dragSelectValue = nil; dragStartIndex = nil
-                                                dragCurrentIndex = nil; dragOriginalSelections = [:]
-                                            }
+                    ScrollViewReader { proxy in
+                        ScrollView {
+                            VStack(spacing: 8) {
+                                if !assets.isEmpty {
+                                    LargePhotoCard(
+                                        asset: assets[0], isSelected: $assets[0].isSelected,
+                                        selectionMode: $selectionMode,
+                                        isBest: true,
+                                        onToggle: { syncToggle(index: 0) },
+                                        onView: { viewerRequest = PhotoViewerRequest(startIndex: 0) }
                                     )
+                                    .id(0)
+                                    .onLongPressGesture(minimumDuration: 0.6) {
+                                        guard !selectionMode else { return }
+                                        guard assets.indices.contains(0) else { return }
+                                        requestDeleteAsset(assets[0])
+                                    }
+                                    .background(GeometryReader { geo in
+                                        Color.clear.preference(key: GridCellFrame.self,
+                                            value: [0: geo.frame(in: .global)])
+                                    })
+                                    .padding(.horizontal)
                                 }
-                                .padding(.horizontal)
+                                if assets.count > 1 {
+                                    LazyVGrid(columns: cols, spacing: 4) {
+                                        ForEach(1..<assets.count, id: \.self) { i in
+                                            SmallPhotoCell(
+                                                asset: assets[i],
+                                                isSelected: $assets[i].isSelected,
+                                                selectionMode: $selectionMode,
+                                                onToggle: { syncToggle(index: i) },
+                                                onView: { viewerRequest = PhotoViewerRequest(startIndex: i) }
+                                            )
+                                            .id(i)
+                                            .onLongPressGesture(minimumDuration: 0.6) {
+                                                guard !selectionMode else { return }
+                                                guard assets.indices.contains(i) else { return }
+                                                requestDeleteAsset(assets[i])
+                                            }
+                                            .background(GeometryReader { geo in
+                                                Color.clear.preference(key: GridCellFrame.self,
+                                                    value: [i: geo.frame(in: .global)])
+                                            })
+                                        }
+                                    }
+                                    .onPreferenceChange(GridCellFrame.self) { cellFrames = $0 }
+                                    .applyIf(selectionMode) {
+                                        $0.simultaneousGesture(
+                                            DragGesture(minimumDistance: 4, coordinateSpace: .global)
+                                                .onChanged { value in
+                                                    handleDragChanged(value, proxy: proxy)
+                                                }
+                                                .onEnded { _ in
+                                                    stopDragSelectionAndAutoScroll()
+                                                }
+                                        )
+                                    }
+                                    .padding(.horizontal)
+                                }
                             }
+                            .padding(.top, 8).padding(.bottom, 80)
                         }
-                        .padding(.top, 8).padding(.bottom, 80)
                     }
                 }
                 .background(AppColors.darkBG)
@@ -1540,6 +1799,27 @@ struct DayPhotoDetailView: View {
         }
         .sheet(item: $viewerRequest) { request in
             FullScreenPhotoViewer(assets: $assets, startIndex: request.startIndex)
+        }
+        .alert(L10n.allowDeleteTitle, isPresented: $showLongPressDeleteAlert, presenting: pendingDeleteAsset) { asset in
+            Button(L10n.cancel, role: .cancel) {
+                pendingDeleteAsset = nil
+            }
+            Button(L10n.deleteNow, role: .destructive) {
+                deleteSingleAsset(asset)
+            }
+        } message: { asset in
+            Text(L10n.timelineLongPressDeleteSingleConfirm(asset.formattedSize))
+        }
+        .overlay(
+            deleting
+            ? ProgressView(L10n.deleting)
+                .padding(24)
+                .background(AppColors.cardBG)
+                .cornerRadius(10)
+            : nil
+        )
+        .onDisappear {
+            stopDragSelectionAndAutoScroll()
         }
     }
 
@@ -1566,6 +1846,141 @@ struct DayPhotoDetailView: View {
         assets[index].isSelected.toggle()
         vm.selectionOverrides[assets[index].id] = assets[index].isSelected
     }
+
+    private func requestDeleteAsset(_ asset: PhotoAsset) {
+        pendingDeleteAsset = asset
+        showLongPressDeleteAlert = true
+    }
+
+    private func deleteSingleAsset(_ asset: PhotoAsset) {
+        Task {
+            deleting = true
+            defer {
+                deleting = false
+                pendingDeleteAsset = nil
+            }
+            try? await PhotoStore.shared.deleteAssets([asset])
+            vm.selectionOverrides.removeValue(forKey: asset.id)
+            assets.removeAll { $0.id == asset.id }
+            if assets.isEmpty {
+                dismiss()
+            }
+        }
+    }
+
+    private enum DragAutoScrollDirection { case up, down }
+
+    private func handleDragChanged(_ value: DragGesture.Value, proxy: ScrollViewProxy) {
+        if dragSelectValue == nil {
+            guard let start = indexAtDragPoint(value.startLocation) else { return }
+            dragStartIndex = start
+            dragCurrentIndex = start
+            dragSelectValue = !assets[start].isSelected
+            dragOriginalSelections = Dictionary(uniqueKeysWithValues: assets.indices.map { ($0, assets[$0].isSelected) })
+            applyDragSelection(to: start)
+        }
+
+        dragLastLocation = value.location
+        if let current = indexAtDragPoint(value.location) {
+            applyDragSelection(to: current)
+        }
+        updateDragAutoScroll(proxy: proxy)
+    }
+
+    private func applyDragSelection(to currentIdx: Int) {
+        guard let startIdx = dragStartIndex, let selectValue = dragSelectValue else { return }
+        dragCurrentIndex = currentIdx
+        let lo = min(startIdx, currentIdx)
+        let hi = max(startIdx, currentIdx)
+        for i in assets.indices {
+            let target = (i >= lo && i <= hi) ? selectValue : (dragOriginalSelections[i] ?? assets[i].isSelected)
+            if assets[i].isSelected != target {
+                assets[i].isSelected = target
+                vm.selectionOverrides[assets[i].id] = target
+            }
+        }
+    }
+
+    private func indexAtDragPoint(_ point: CGPoint) -> Int? {
+        if let hit = cellFrames.first(where: { $0.value.contains(point) })?.key {
+            return hit
+        }
+        guard !cellFrames.isEmpty else { return nil }
+        guard let minY = cellFrames.values.map(\.minY).min(),
+              let maxY = cellFrames.values.map(\.maxY).max() else { return nil }
+        if point.y < minY { return cellFrames.keys.min() }
+        if point.y > maxY { return cellFrames.keys.max() }
+        return cellFrames.min(by: { abs($0.value.midY - point.y) < abs($1.value.midY - point.y) })?.key
+    }
+
+    // 基于屏幕坐标判断自动滚动方向，而不是内容边界
+    private func dragAutoScrollDirectionForCurrentLocation() -> DragAutoScrollDirection? {
+        guard let point = dragLastLocation else { return nil }
+        let screenHeight = UIScreen.main.bounds.height
+        let topTrigger: CGFloat = 140
+        let bottomTrigger: CGFloat = screenHeight - 110
+        if point.y <= topTrigger { return .up }
+        if point.y >= bottomTrigger { return .down }
+        return nil
+    }
+
+    private func updateDragAutoScroll(proxy: ScrollViewProxy) {
+        guard dragSelectValue != nil else {
+            stopDragAutoScroll()
+            return
+        }
+        guard let direction = dragAutoScrollDirectionForCurrentLocation() else {
+            stopDragAutoScroll()
+            return
+        }
+        guard dragAutoScrollTask == nil || dragAutoScrollDirection != direction else { return }
+        startDragAutoScroll(direction: direction, proxy: proxy)
+    }
+
+    private func startDragAutoScroll(direction: DragAutoScrollDirection, proxy: ScrollViewProxy) {
+        stopDragAutoScroll()
+        dragAutoScrollDirection = direction
+        dragAutoScrollTask = Task { @MainActor in
+            while !Task.isCancelled, dragSelectValue != nil {
+                guard let liveDirection = dragAutoScrollDirectionForCurrentLocation(),
+                      liveDirection == direction else { break }
+                guard !assets.isEmpty else { break }
+
+                let base = dragCurrentIndex ?? dragStartIndex ?? 0
+                let nextIndex: Int
+                switch direction {
+                case .up: nextIndex = max(0, base - 3)
+                case .down: nextIndex = min(assets.count - 1, base + 3)
+                }
+                guard nextIndex != base else { break }
+
+                applyDragSelection(to: nextIndex)
+                withAnimation(.linear(duration: 0.15)) {
+                    proxy.scrollTo(nextIndex, anchor: direction == .down ? .bottom : .top)
+                }
+                try? await Task.sleep(nanoseconds: 150_000_000)
+            }
+            if !Task.isCancelled {
+                dragAutoScrollDirection = nil
+                dragAutoScrollTask = nil
+            }
+        }
+    }
+
+    private func stopDragAutoScroll() {
+        dragAutoScrollTask?.cancel()
+        dragAutoScrollTask = nil
+        dragAutoScrollDirection = nil
+    }
+
+    private func stopDragSelectionAndAutoScroll() {
+        stopDragAutoScroll()
+        dragSelectValue = nil
+        dragStartIndex = nil
+        dragCurrentIndex = nil
+        dragOriginalSelections = [:]
+        dragLastLocation = nil
+    }
 }
 
 // MARK: - Full-screen photo viewer
@@ -1575,6 +1990,7 @@ struct FullScreenPhotoViewer: View {
     let startIndex: Int
     @State private var currentIndex: Int
     @State private var selectionMode = false
+    @Environment(\.colorScheme) private var colorScheme
     @Environment(\.dismiss) var dismiss
 
     init(assets: Binding<[PhotoAsset]>, startIndex: Int) {
@@ -1601,9 +2017,9 @@ struct FullScreenPhotoViewer: View {
                 Button { dismiss() } label: {
                     Image(systemName: "xmark")
                         .font(.system(size: 16, weight: .semibold))
-                        .foregroundColor(.white)
+                        .foregroundColor(isLightMode ? .black : .white)
                         .frame(width: 34, height: 34)
-                        .background(Color.black.opacity(0.55))
+                        .background(Color.clear)
                         .clipShape(Circle())
                 }
 
@@ -1611,7 +2027,7 @@ struct FullScreenPhotoViewer: View {
 
                 Text("\(currentIndex + 1) / \(assets.count)")
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(.white)
+                    .foregroundColor(isLightMode ? .black : .white)
                     .shadow(radius: 2)
 
                 Spacer()
@@ -1623,19 +2039,19 @@ struct FullScreenPhotoViewer: View {
                 .foregroundColor(selectionMode ? AppColors.green : AppColors.purple)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 6)
-                .background(Color.black.opacity(0.55))
+                .background(Color.clear)
                 .cornerRadius(8)
             }
             .padding(.horizontal, 16)
             .padding(.top, 6)
             .padding(.bottom, 8)
-            .background(Color.black.opacity(0.22))
+            .background(Color.clear)
         }
         // Bottom panel is also inset so 16:9 photos/videos won't overlap with info/actions.
         .safeAreaInset(edge: .bottom) {
             VStack(spacing: 8) {
                 if currentIndex < assets.count {
-                    FullScreenAssetInfoBar(asset: assets[currentIndex].asset)
+                    FullScreenAssetInfoBar(asset: assets[currentIndex].asset, onMask: isLightMode)
                 }
                 if selectionMode {
                     let isSelected = currentIndex < assets.count && assets[currentIndex].isSelected
@@ -1658,9 +2074,11 @@ struct FullScreenPhotoViewer: View {
             .padding(.horizontal, 12)
             .padding(.top, 6)
             .padding(.bottom, 8)
-            .background(Color.black.opacity(0.2))
+            .background(isLightMode ? Color.black.opacity(0.14) : Color.black.opacity(0.2))
         }
     }
+
+    private var isLightMode: Bool { colorScheme == .light }
 
     private func toggleSelection(at index: Int) {
         guard index < assets.count else { return }
@@ -1749,7 +2167,9 @@ struct FullResAssetView: View {
 
 private struct FullScreenAssetInfoBar: View {
     let asset: PHAsset
+    var onMask: Bool = false
     @State private var locationText: String = L10n.locating
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -1763,17 +2183,17 @@ private struct FullScreenAssetInfoBar: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .background(Color.black.opacity(0.65))
-        .cornerRadius(12)
+        .padding(.horizontal, onMask ? 4 : 12)
+        .padding(.vertical, onMask ? 0 : 10)
+        .background(onMask ? Color.clear : Color.black.opacity(0.65))
+        .cornerRadius(onMask ? 0 : 12)
         .task(id: asset.localIdentifier) { await resolveLocation() }
     }
 
     private func infoText(_ text: String) -> some View {
         Text(text)
             .font(.system(size: 11, weight: .medium))
-            .foregroundColor(.white.opacity(0.9))
+            .foregroundColor(colorScheme == .light ? .black.opacity(0.88) : .white.opacity(0.9))
             .lineLimit(1)
     }
 

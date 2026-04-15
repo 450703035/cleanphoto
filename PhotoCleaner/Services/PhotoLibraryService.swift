@@ -124,58 +124,95 @@ class PhotoLibraryService: ObservableObject {
     //   Clear ordinary landscape / object    →  55–70
     //   Portrait with good quality           →  70–88
     //   Favourite                            →  88–99
-    //   Screenshot (low-value content)       →  20–45
+    //   Screenshot / utility (low-value)     →  20–45
     private static func computeScore(cgImage: CGImage, asset: PHAsset) -> ScoreResult {
-        // ── Run face detection + classification in ONE handler pass ──────
-        // Previously called VNClassifyImageRequest twice (detectPet + aestheticBonus).
-        // Batching both into a single VNImageRequestHandler lets Vision share the
-        // neural engine pipeline and cuts Vision time roughly in half.
-        let faceRequest     = VNDetectFaceRectanglesRequest()
-        let classifyRequest = VNClassifyImageRequest()
-        let handler         = VNImageRequestHandler(cgImage: cgImage, options: [:])
-        try? handler.perform([faceRequest, classifyRequest])
+        // ── Vision requests — all batched in ONE handler pass ────────────
+        // VNDetectFaceCaptureQualityRequest: face count + per-face quality (0–1)
+        // VNClassifyImageRequest: pet detection labels
+        // VNCalculateImageAestheticsScoresRequest (iOS 18+): real aesthetic model
+        let faceQualityRequest = VNDetectFaceCaptureQualityRequest()
+        let classifyRequest    = VNClassifyImageRequest()
+        var visionRequests: [VNRequest] = [faceQualityRequest, classifyRequest]
 
-        let faceCount       = faceRequest.results?.count ?? 0
+        var aestheticsReq: VNRequest? = nil
+        if #available(iOS 18.0, *) {
+            let req = VNCalculateImageAestheticsScoresRequest()
+            aestheticsReq = req
+            visionRequests.append(req)
+        }
+
+        let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
+        try? handler.perform(visionRequests)
+
+        // ── Face quality ─────────────────────────────────────────────────
+        // faceCaptureQuality: 0 = worst (blurry/occluded), 1 = best (sharp, eyes open)
+        let faceObservations  = faceQualityRequest.results ?? []
+        let faceCount         = faceObservations.count
+        let bestFaceQuality   = faceObservations.compactMap { $0.faceCaptureQuality }.max() ?? 0
+        let hasFaces          = faceCount > 0
+
+        // ── Pet detection from shared classify results ────────────────────
         let classifications = classifyRequest.results ?? []
-
-        // Pet detection from shared classify results (no second Vision call)
         let petKeywords = ["dog","cat","animal","bird","rabbit","hamster","pet","puppy","kitten"]
         let hasPet = classifications.contains { obs in
             obs.confidence > 0.4 && petKeywords.contains(where: { obs.identifier.lowercased().contains($0) })
         }
 
-        // Aesthetic bonus from shared classify results
-        let aesthetic = min(12, classifications.prefix(5).filter { $0.confidence > 0.7 }.count * 5)
+        // ── Aesthetic score — iOS 18+ native model ────────────────────────
+        // VNCalculateImageAestheticsScoresRequest is trained on aesthetic quality,
+        // not content classification — overallScore ≈ −1…+1 (higher = better).
+        // isUtility flags receipts, documents, QR codes etc. captured by camera.
+        var aestheticBonus = 0
+        var isUtility = false
+        if #available(iOS 18.0, *),
+           let req = aestheticsReq as? VNCalculateImageAestheticsScoresRequest,
+           let obs = req.results?.first {
+            isUtility = obs.isUtility
+            // Map −1…+1 → −8…+10
+            let clamped = Double(max(-1.0, min(1.0, obs.overallScore)))
+            aestheticBonus = Int((clamped + 1.0) / 2.0 * 18.0) - 8
+        }
 
-        let blur           = laplacianVariance(cgImage: cgImage)
-        let (meanL, _)     = exposureStats(cgImage: cgImage)
+        // ── Blur — texture-aware Laplacian (edge pixels only) ─────────────
+        let blur           = textureAwareLaplacianVariance(cgImage: cgImage)
         let isBlurry       = blur < ScoringConfig.blurSevereThreshold
         let isSlightBlurry = blur >= ScoringConfig.blurSevereThreshold && blur < ScoringConfig.blurSlightThreshold
         let isVerySharp    = blur >= ScoringConfig.blurSharpThreshold
         let isFocusFailed  = blur < (ScoringConfig.blurSevereThreshold * 0.7)
         let isShaky        = blur >= (ScoringConfig.blurSevereThreshold * 0.7) && blur < ScoringConfig.blurSlightThreshold
-        let isUnderExposed = meanL < ScoringConfig.underExposureThreshold
-        let isOverExposed  = meanL > ScoringConfig.overExposureThreshold
-        let isGoodExposure = meanL >= ScoringConfig.goodExposureLowerBound && meanL <= ScoringConfig.goodExposureUpperBound
-        let isScreenshot   = asset.mediaSubtypes.contains(.photoScreenshot)
-        let isPanorama     = asset.mediaSubtypes.contains(.photoPanorama)
-        let isLivePhoto    = asset.mediaSubtypes.contains(.photoLive)
-        let isFav          = asset.isFavorite
+
+        // ── Exposure — histogram-based (dark/bright pixel ratios) ─────────
+        let (isUnderExposed, isOverExposed, isGoodExposure) = exposureFromHistogram(cgImage: cgImage)
+
+        // ── Metadata flags ────────────────────────────────────────────────
+        let isScreenshot = asset.mediaSubtypes.contains(.photoScreenshot)
+        let isPanorama   = asset.mediaSubtypes.contains(.photoPanorama)
+        let isLivePhoto  = asset.mediaSubtypes.contains(.photoLive)
+        let isFav        = asset.isFavorite
 
         var score = ScoringConfig.baseScore
 
-        // ── 1. Emotional / content-subject bonus ──────────────────────────
-        if isFav               { score += ScoringConfig.favoriteBonus }
-        else if faceCount >= 2 { score += ScoringConfig.multiFaceBonus }
-        else if faceCount == 1 { score += ScoringConfig.singleFaceBonus }
-        else if hasPet         { score += ScoringConfig.petBonus }
+        // ── 1. Face quality bonus / penalty ──────────────────────────────
+        // quality > 0.5 → sharp face, worthy bonus
+        // quality < 0.3 → blurry / occluded face; penalise (cancels raw blur miss)
+        // 0.3–0.5      → uncertain quality, neutral
+        if hasFaces {
+            if bestFaceQuality > 0.5 {
+                score += faceCount >= 2 ? ScoringConfig.multiFaceBonus : ScoringConfig.singleFaceBonus
+            } else if bestFaceQuality < 0.3 {
+                score += ScoringConfig.blurryFacePenalty   // negative constant
+            }
+        } else if hasPet {
+            score += ScoringConfig.petBonus
+        }
 
-        // ── 2. Content-type adjustment ─────────────────────────────────────
-        if isScreenshot      { score -= ScoringConfig.screenshotPenalty }
-        else if isPanorama   { score += ScoringConfig.panoramaBonus }
-        else if isLivePhoto  { score += ScoringConfig.livePhotoBonus }
+        // ── 2. Favourite / content-type adjustment ────────────────────────
+        if isFav { score += ScoringConfig.favoriteBonus }
+        if isScreenshot || isUtility { score -= ScoringConfig.screenshotPenalty }
+        else if isPanorama            { score += ScoringConfig.panoramaBonus }
+        else if isLivePhoto           { score += ScoringConfig.livePhotoBonus }
 
-        // ── 3. Image quality (biggest swing: ±30) ─────────────────────────
+        // ── 3. Image quality ──────────────────────────────────────────────
         if isBlurry            { score -= ScoringConfig.severeBlurPenalty }
         else if isSlightBlurry { score -= ScoringConfig.slightBlurPenalty }
         else if isVerySharp    { score += ScoringConfig.verySharpBonus }
@@ -184,44 +221,89 @@ class PhotoLibraryService: ObservableObject {
         if isUnderExposed || isOverExposed { score -= ScoringConfig.badExposurePenalty }
         else if isGoodExposure             { score += ScoringConfig.goodExposureBonus }
 
-        // ── 4. Aesthetic bonus (0–12) ──────────────────────────────────────
-        score += aesthetic
+        // ── 4. Aesthetic score (iOS 18+ model, else 0) ────────────────────
+        score += aestheticBonus
 
-        // ── 5. Redundancy / depreciation penalties ────────────────────────
+        // ── 5. Short video penalty ────────────────────────────────────────
         if asset.mediaType == .video && asset.duration < 3 { score -= ScoringConfig.shortVideoPenalty }
-        // Time weight: only apply age decay when the user has enabled it in Settings
-        if AppConfig.timeWeight, let date = asset.creationDate {
-            let years = max(0, Calendar.current.dateComponents([.year], from: date, to: Date()).year ?? 0)
-            if years > ScoringConfig.agePenaltyStartYears && !isFav && faceCount == 0 {
-                score -= min(
-                    ScoringConfig.maxAgePenalty,
-                    (years - ScoringConfig.agePenaltyStartYears) * ScoringConfig.agePenaltyPerYear
-                )
-            }
-        }
 
         return ScoreResult(
             score: max(ScoringConfig.minScore, min(ScoringConfig.maxScore, score)),
             isBlurry: isBlurry,
             isOverExposed: isOverExposed,
             isUnderExposed: isUnderExposed,
-            hasFaces: faceCount > 0,
+            hasFaces: hasFaces,
             isShaky: isShaky,
             isFocusFailed: isFocusFailed
         )
     }
 
-    // MARK: - Laplacian variance for blur detection (uses shared CIContext)
-    private static func laplacianVariance(cgImage: CGImage) -> Double {
+    // MARK: - Texture-aware Laplacian variance (blur detection)
+    //
+    // Only counts pixels that lie on detected edges (Sobel magnitude > threshold).
+    // Pure-color backgrounds have near-zero edge density and no longer drag down
+    // the sharpness score — a plain-background portrait won't look artificially blurry.
+    // If the image has almost no edges (featureless / solid fill), returns a neutral
+    // value (300) so it doesn't get incorrectly penalised as blurry.
+    private static func textureAwareLaplacianVariance(cgImage: CGImage) -> Double {
         let ciImage = CIImage(cgImage: cgImage)
-        guard let filter = CIFilter(name: "CILaplacian") else { return 100 }
-        filter.setValue(ciImage, forKey: kCIInputImageKey)
-        guard let output = filter.outputImage,
-              let bm = ciContext.createCGImage(output, from: output.extent) else { return 100 }
-        let w = bm.width, h = bm.height
-        guard let data = bm.dataProvider?.data,
+
+        // Laplacian response — 2nd-derivative sharpness at each pixel
+        guard let lapFilter = CIFilter(name: "CILaplacian") else { return 100 }
+        lapFilter.setValue(ciImage, forKey: kCIInputImageKey)
+        guard let lapOut = lapFilter.outputImage else { return 100 }
+
+        // Edge magnitude — 1st-derivative: where edges actually exist
+        guard let edgeFilter = CIFilter(name: "CIEdges") else {
+            return globalLaplacianVariance(lapOut: lapOut, extent: ciImage.extent)
+        }
+        edgeFilter.setValue(ciImage, forKey: kCIInputImageKey)
+        edgeFilter.setValue(2.0 as NSNumber, forKey: kCIInputIntensityKey)
+        guard let edgeOut = edgeFilter.outputImage else {
+            return globalLaplacianVariance(lapOut: lapOut, extent: ciImage.extent)
+        }
+
+        let extent = ciImage.extent
+        guard let lapBM  = ciContext.createCGImage(lapOut,  from: extent),
+              let edgeBM = ciContext.createCGImage(edgeOut, from: extent) else { return 100 }
+
+        let w = lapBM.width, h = lapBM.height
+        guard edgeBM.width == w, edgeBM.height == h else { return 100 }
+        guard let lapData  = lapBM.dataProvider?.data,  let lapPtr  = CFDataGetBytePtr(lapData),
+              let edgeData = edgeBM.dataProvider?.data, let edgePtr = CFDataGetBytePtr(edgeData)
+        else { return 100 }
+
+        let pixelCount   = w * h
+        let edgeTreshold: UInt8 = 20          // pixels with Sobel > 20/255 are "edge pixels"
+        let minEdgePixels = max(50, pixelCount / 50)  // require ≥ 2% edge coverage
+
+        var sum: Double = 0, sumSq: Double = 0, edgePixels = 0
+
+        for i in 0..<pixelCount {
+            // Take the max of R/G/B channels from the edge image as edge magnitude
+            let em = Swift.max(edgePtr[i * 4], edgePtr[i * 4 + 1], edgePtr[i * 4 + 2])
+            guard em > edgeTreshold else { continue }
+            let v = Double(lapPtr[i * 4])
+            sum   += v
+            sumSq += v * v
+            edgePixels += 1
+        }
+
+        guard edgePixels >= minEdgePixels else {
+            // Featureless image (solid background, etc.) — not blurry, just has no content.
+            return 300.0
+        }
+
+        let mean = sum / Double(edgePixels)
+        return (sumSq / Double(edgePixels)) - (mean * mean)
+    }
+
+    // Fallback: global Laplacian variance (used when CIEdges is unavailable)
+    private static func globalLaplacianVariance(lapOut: CIImage, extent: CGRect) -> Double {
+        guard let bm   = ciContext.createCGImage(lapOut, from: extent),
+              let data = bm.dataProvider?.data,
               let ptr  = CFDataGetBytePtr(data) else { return 100 }
-        let count = w * h
+        let count = bm.width * bm.height
         var sum: Double = 0, sumSq: Double = 0
         for i in 0..<count {
             let v = Double(ptr[i * 4])
@@ -231,19 +313,57 @@ class PhotoLibraryService: ObservableObject {
         return (sumSq / Double(count)) - (mean * mean)
     }
 
-    // MARK: - Exposure stats (uses shared CIContext)
-    private static func exposureStats(cgImage: CGImage) -> (mean: Double, stdDev: Double) {
+    // MARK: - Histogram-based exposure detection
+    //
+    // Measures the fraction of "very dark" (luma < 10) and "very bright" (luma > 245)
+    // pixels.  Unlike a simple average, this correctly handles:
+    //   • Silhouette photos  — low mean but NOT under-exposed
+    //   • Snow / white bg    — high mean but NOT over-exposed
+    //   • Half sky / ground  — normal mean but could be both extremes (high contrast, OK)
+    private static func exposureFromHistogram(cgImage: CGImage) -> (isUnderExposed: Bool, isOverExposed: Bool, isGoodExposure: Bool) {
         let ciImage = CIImage(cgImage: cgImage)
-        let filter = CIFilter(name: "CIAreaAverage",
-                              parameters: [kCIInputImageKey: ciImage,
-                                           kCIInputExtentKey: CIVector(cgRect: ciImage.extent)])
-        guard let output = filter?.outputImage else { return (128, 30) }
-        var pixel = [UInt8](repeating: 0, count: 4)
-        ciContext.render(output, toBitmap: &pixel, rowBytes: 4,
-                         bounds: CGRect(x: 0, y: 0, width: 1, height: 1),
-                         format: .RGBA8, colorSpace: nil)
-        let lum = 0.299 * Double(pixel[0]) + 0.587 * Double(pixel[1]) + 0.114 * Double(pixel[2])
-        return (lum, 30)
+
+        // Render to a small known-format bitmap; 64×64 is more than enough for statistics
+        let scale = 64.0 / Double(max(cgImage.width, cgImage.height, 1))
+        let scaledCI = ciImage.samplingLinear()
+            .transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+        let sw = Int(scaledCI.extent.width.rounded()),
+            sh = Int(scaledCI.extent.height.rounded())
+        guard sw > 0, sh > 0 else { return (false, false, true) }
+
+        var pixels = [UInt8](repeating: 0, count: sw * sh * 4)
+        ciContext.render(scaledCI,
+                         toBitmap: &pixels,
+                         rowBytes: sw * 4,
+                         bounds: scaledCI.extent,
+                         format: .RGBA8,
+                         colorSpace: CGColorSpaceCreateDeviceRGB())
+
+        let total = sw * sh
+        var darkCount = 0, brightCount = 0
+
+        for i in 0..<total {
+            let r = Double(pixels[i * 4])
+            let g = Double(pixels[i * 4 + 1])
+            let b = Double(pixels[i * 4 + 2])
+            let lum = 0.299 * r + 0.587 * g + 0.114 * b
+            if lum < 10  { darkCount   += 1 }
+            if lum > 245 { brightCount += 1 }
+        }
+
+        let darkRatio   = Double(darkCount)   / Double(total)
+        let brightRatio = Double(brightCount) / Double(total)
+
+        // High-contrast scene (silhouette against sky): both extremes present → not an error
+        let isBothExtreme = darkRatio   > ScoringConfig.bothExtremesDarkMin
+                         && brightRatio > ScoringConfig.bothExtremesBrightMin
+        let isUnder = !isBothExtreme && darkRatio   > ScoringConfig.underExposedDarkRatio
+        let isOver  = !isBothExtreme && brightRatio > ScoringConfig.overExposedBrightRatio
+        let isGood  = !isUnder && !isOver
+                   && darkRatio   < ScoringConfig.goodExposureDarkMax
+                   && brightRatio < ScoringConfig.goodExposureBrightMax
+
+        return (isUnder, isOver, isGood)
     }
 
     // MARK: - Detect duplicates using feature print (with hash fallback)
@@ -383,10 +503,15 @@ class PhotoLibraryService: ObservableObject {
     // MARK: - Detect low quality
     func findLowQuality(assets: [PhotoAsset], qualityMap: [String: QualitySignals]) -> [PhotoAsset] {
         assets
-            // Screenshots must stay in Screenshot Cleanup when metadata marks them as screenshot.
+            // Hard exclusions (same logic as screenshots):
+            //   • Screenshots  → belong to Screenshot Cleanup
+            //   • Favourites   → user explicitly wants to keep them
+            //   • hasAdjustments → user spent time editing; can't be a waste photo
             .filter {
                 $0.score < ScoringConfig.lowQualityThreshold &&
-                !$0.asset.mediaSubtypes.contains(.photoScreenshot)
+                !$0.asset.mediaSubtypes.contains(.photoScreenshot) &&
+                !$0.asset.isFavorite &&
+                !$0.asset.hasAdjustments
             }
             .map { asset in
                 var a = asset
@@ -564,9 +689,9 @@ class PhotoLibraryService: ObservableObject {
     private static func dHash(cgImage: CGImage) -> UInt64 {
         let width = 9
         let height = 8
-        let bytesPerPixel = 1
+        let bytesPerPixel = 4
         let bytesPerRow = width * bytesPerPixel
-        var pixels = [UInt8](repeating: 0, count: width * height)
+        var pixels = [UInt8](repeating: 0, count: height * bytesPerRow)
 
         guard let ctx = CGContext(
             data: &pixels,
@@ -574,8 +699,8 @@ class PhotoLibraryService: ObservableObject {
             height: height,
             bitsPerComponent: 8,
             bytesPerRow: bytesPerRow,
-            space: CGColorSpaceCreateDeviceGray(),
-            bitmapInfo: CGImageAlphaInfo.none.rawValue
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
         ) else {
             return 0
         }
@@ -583,13 +708,21 @@ class PhotoLibraryService: ObservableObject {
         ctx.interpolationQuality = .low
         ctx.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
 
+        @inline(__always)
+        func luma(atX x: Int, y: Int) -> Double {
+            let offset = y * bytesPerRow + x * bytesPerPixel
+            let r = Double(pixels[offset])
+            let g = Double(pixels[offset + 1])
+            let b = Double(pixels[offset + 2])
+            return 0.299 * r + 0.587 * g + 0.114 * b
+        }
+
         var hash: UInt64 = 0
         var bitIndex: UInt64 = 0
         for y in 0..<height {
-            let row = y * width
             for x in 0..<(width - 1) {
-                let left = pixels[row + x]
-                let right = pixels[row + x + 1]
+                let left = luma(atX: x, y: y)
+                let right = luma(atX: x + 1, y: y)
                 if left > right {
                     hash |= (1 << bitIndex)
                 }

@@ -8,6 +8,7 @@ struct PhotoAsset: Identifiable, Hashable {
     var score: Int
     var isSelected: Bool
     var reason: LowQualityReason?
+    var coldTier: ColdTier? = nil
     var fileSizeBytes: Int64? = nil
 
     var sizeBytes: Int64 {
@@ -44,6 +45,18 @@ struct AlbumFolder: Identifiable {
     var totalSize: Int64 { assets.reduce(0) { $0 + $1.sizeBytes } }
     var formattedSize: String { ByteCountFormatter.string(fromByteCount: totalSize, countStyle: .file) }
     var recommendDelete: Bool { averageScore < AppConfig.deleteThreshold }
+}
+
+// MARK: - Cold photo tier (behavioral signals)
+enum ColdTier: String {
+    /// 🥶 Extremely cold: 3+ years old, never edited, barely touched after capture.
+    case frozen = "frozen"
+    /// ❄️ Cold: 1+ year old, mostly untouched.
+    case cold   = "cold"
+
+    var emoji: String { self == .frozen ? "🥶" : "❄️" }
+    var label: String { self == .frozen ? L10n.coldTierFrozen : L10n.coldTierCold }
+    var detailLabel: String { self == .frozen ? L10n.coldTierFrozenDetail : L10n.coldTierColdDetail }
 }
 
 // MARK: - Low quality reason

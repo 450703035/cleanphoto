@@ -5,7 +5,6 @@ struct SettingsView: View {
     @AppStorage("themeMode") private var themeModeRaw = AppThemeMode.system.rawValue
     @AppStorage("appLanguage") private var appLanguageRaw = AppLanguage.zh.rawValue
     @AppStorage("autoSelect")   private var autoSelect   = true
-    @AppStorage("timeWeight")   private var timeWeight   = true
     @AppStorage("protectFaces") private var protectFaces = true
     @AppStorage("dailyReminder") private var dailyReminder = false
     @AppStorage("deleteThreshold") private var threshold = 40
@@ -106,11 +105,6 @@ struct SettingsView: View {
                             SettingsToggleRow(icon: "arrow.triangle.2.circlepath", iconBg: AppColors.green,
                                               title: L10n.autoSelect, subtitle: L10n.autoSelectDesc,
                                               isOn: $autoSelect)
-                            Divider().background(AppColors.separator).padding(.leading, 52)
-
-                            SettingsToggleRow(icon: "calendar", iconBg: AppColors.amber,
-                                              title: L10n.timeWeight, subtitle: L10n.timeWeightDesc,
-                                              isOn: $timeWeight)
                             Divider().background(AppColors.separator).padding(.leading, 52)
 
                             SettingsToggleRow(icon: "shield.fill", iconBg: AppColors.red,

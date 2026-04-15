@@ -356,6 +356,7 @@ struct AlbumFolderCell: View {
     let folder: AlbumFolder
     var onTap: () -> Void
     var onLongPress: () -> Void
+    var onAssetLongPress: (PhotoAsset) -> Void = { _ in }
     var onVisible: () -> Void = {}
     var onHidden: () -> Void = {}
 
@@ -368,6 +369,9 @@ struct AlbumFolderCell: View {
                         .aspectRatio(1, contentMode: .fill)
                         .clipped()
                         .opacity(folder.recommendDelete ? 0.5 : 1)
+                        .onLongPressGesture(minimumDuration: 0.6) {
+                            onAssetLongPress(asset)
+                        }
                 }
                 if folder.assets.count < 4 {
                     ForEach(0..<(4 - min(folder.assets.count, 4)), id: \.self) { _ in
