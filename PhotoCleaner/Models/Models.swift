@@ -117,6 +117,7 @@ struct LibrarySummary {
     var totalCount: Int = 0
     var totalBytes: Int64 = 0
     var freeableBytes: Int64 = 0
+    var releasedBytes: Int64 = 0
     var healthScore: Int = 0
     var videoBytes: Int64 = 0
     var screenshotBytes: Int64 = 0
@@ -125,6 +126,7 @@ struct LibrarySummary {
 
     var formattedTotal: String { ByteCountFormatter.string(fromByteCount: totalBytes, countStyle: .file) }
     var formattedFreeable: String { ByteCountFormatter.string(fromByteCount: freeableBytes, countStyle: .file) }
+    var formattedReleased: String { ByteCountFormatter.string(fromByteCount: releasedBytes, countStyle: .file) }
 }
 
 // MARK: - Swipe action

@@ -2,6 +2,7 @@ import SwiftUI
 
 @main
 struct PhotoCleanerApp: App {
+    @Environment(\.scenePhase) private var scenePhase
     @AppStorage("themeMode") private var themeModeRaw = AppThemeMode.system.rawValue
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
     @StateObject private var scanVM = ScanViewModel()
@@ -20,6 +21,10 @@ struct PhotoCleanerApp: App {
                 OnboardingView(hasCompletedOnboarding: $hasCompletedOnboarding, scanVM: scanVM)
                     .preferredColorScheme(currentThemeMode.colorScheme)
             }
+        }
+        .onChange(of: scenePhase) { newPhase in
+            guard newPhase == .active else { return }
+            scanVM.resumeScanningIfNeededAfterAppBecameActive()
         }
     }
 }

@@ -138,6 +138,7 @@ enum L10n {
     static var totalPhotos: String { isEn ? "Total Photos" : "照片总数" }
     static var storageUsed: String { isEn ? "Storage Used" : "占用空间" }
     static var freeable: String { isEn ? "Freeable" : "可释放" }
+    static var released: String { isEn ? "Freed" : "已释放" }
     static var spaceDistribution: String { isEn ? "Space Distribution" : "空间分布" }
     static var video: String { isEn ? "Video" : "视频" }
     static var screenshot: String { isEn ? "Screenshot" : "截图" }

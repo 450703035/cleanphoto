@@ -501,6 +501,7 @@ struct HealthCard: View {
                 row("📸 \(L10n.totalPhotos)", "\(summary.totalCount)")
                 row("💾 \(L10n.storageUsed)", summary.formattedTotal)
                 row("🧹 \(L10n.freeable)", summary.formattedFreeable, accent: true)
+                row("✅ \(L10n.released)", summary.formattedReleased)
             }
         }
         .padding()

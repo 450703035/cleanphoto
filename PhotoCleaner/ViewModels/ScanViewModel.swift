@@ -36,6 +36,7 @@ class ScanViewModel: ObservableObject {
     private var metadataWarmupTask: Task<Void, Never>?
     private var launchIncrementalSyncTask: Task<Void, Never>?
     private let timelineRevealSeconds = 20
+    private var lifetimeReleasedBytes: Int64 = 0
     private var cancellables = Set<AnyCancellable>()
 
     var scanElapsedText: String {
@@ -53,11 +54,19 @@ class ScanViewModel: ObservableObject {
             .dropFirst()
             .filter { !$0.isEmpty }
             .sink { [weak self] (ids: Set<String>) in
-                guard let self, self.phase == .done else { return }
+                guard let self else { return }
+                Task { [weak self] in
+                    await self?.refreshReleasedBytes()
+                }
+                guard self.phase == .done else { return }
                 self.allAssets = self.store.allAssets
                 self.pruneArrays(removingIds: ids)
             }
             .store(in: &cancellables)
+
+        Task { [weak self] in
+            await self?.refreshReleasedBytes()
+        }
     }
 
     // MARK: - Authorization
@@ -178,6 +187,7 @@ class ScanViewModel: ObservableObject {
             .map { var a = $0; a.isSelected = false; return a }
 
         buildSummary(assets: scored)
+        await refreshReleasedBytes()
         isBackgroundAnalyzing = false
         backgroundProgress = 0
         backgroundLabel = ""
@@ -187,7 +197,15 @@ class ScanViewModel: ObservableObject {
 
     func startScan() {
         guard phase != .scanning else { return }
-        scanTask = Task { await runScan() }
+        scanTask = Task { [weak self] in
+            guard let self else { return }
+            defer {
+                Task { @MainActor [weak self] in
+                    self?.scanTask = nil
+                }
+            }
+            await self.runScan()
+        }
     }
 
     func reset() {
@@ -196,6 +214,7 @@ class ScanViewModel: ObservableObject {
         scanClockTask?.cancel()
         phase = .idle; progress = 0; analyzedCount = 0
         summary = LibrarySummary()
+        summary.releasedBytes = lifetimeReleasedBytes
         scanElapsedSeconds = 0
         isBackgroundAnalyzing = false
         backgroundProgress = 0
@@ -209,6 +228,40 @@ class ScanViewModel: ObservableObject {
     func setDetailInteraction(_ active: Bool) {
         guard isUserInteractingInDetail != active else { return }
         isUserInteractingInDetail = active
+    }
+
+    /// If the app was backgrounded/locked and scan workers got interrupted,
+    /// automatically restart scanning when returning to foreground.
+    func resumeScanningIfNeededAfterAppBecameActive() {
+        let scanInterrupted = (scanTask == nil)
+        let deepInterrupted = isBackgroundAnalyzing && (backgroundAnalysisTask == nil)
+
+        if phase == .scanning, scanInterrupted {
+            scanTask = Task { [weak self] in
+                guard let self else { return }
+                defer {
+                    Task { @MainActor [weak self] in
+                        self?.scanTask = nil
+                    }
+                }
+                await self.runScan()
+            }
+            return
+        }
+
+        if phase == .done, deepInterrupted {
+            phase = .scanning
+            phaseLabel = L10n.bgDeepAnalysis
+            scanTask = Task { [weak self] in
+                guard let self else { return }
+                defer {
+                    Task { @MainActor [weak self] in
+                        self?.scanTask = nil
+                    }
+                }
+                await self.runScan()
+            }
+        }
     }
 
     // MARK: - Scan
@@ -324,6 +377,11 @@ class ScanViewModel: ObservableObject {
         backgroundAnalysisTask?.cancel()
         backgroundAnalysisTask = Task(priority: .utility) { [weak self] in
             guard let self else { return }
+            defer {
+                Task { @MainActor [weak self] in
+                    self?.backgroundAnalysisTask = nil
+                }
+            }
             await self.performBackgroundDeepScan(
                 raw: raw,
                 initialScored: scored,
@@ -596,6 +654,7 @@ class ScanViewModel: ObservableObject {
         backgroundProgress = 1.0
         backgroundLabel = L10n.bgComplete
         progress = 1.0
+        await refreshReleasedBytes()
         timelineVisibleAssets = scored
         timelineCanShowAssets = true
         finalizeScanDuration(scanStart: scanStart)
@@ -630,6 +689,7 @@ class ScanViewModel: ObservableObject {
 
     private func buildSummary(assets: [PhotoAsset]) {
         var s = LibrarySummary()
+        s.releasedBytes = lifetimeReleasedBytes
         s.totalCount = assets.count
         for a in assets {
             s.totalBytes += a.sizeBytes
@@ -642,6 +702,12 @@ class ScanViewModel: ObservableObject {
         let bad = assets.filter { $0.score < 40 }.count
         s.healthScore = max(0, 100 - Int(Double(bad) / Double(max(assets.count, 1)) * 100))
         summary = s
+    }
+
+    private func refreshReleasedBytes() async {
+        let stats = await DatabaseService.shared.loadCleaningStats()
+        lifetimeReleasedBytes = max(0, stats.freedBytes)
+        summary.releasedBytes = lifetimeReleasedBytes
     }
 
     private func mergeGroups(_ groups: [PhotoGroup]) -> [PhotoGroup] {

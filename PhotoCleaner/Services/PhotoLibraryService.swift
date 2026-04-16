@@ -9,6 +9,7 @@ class PhotoLibraryService: ObservableObject {
 
     static let shared = PhotoLibraryService()
     private init() {}
+    private let imageRequestTimeout: TimeInterval = 12
 
     // MARK: - Permission
     func requestAuthorization() async -> Bool {
@@ -61,37 +62,23 @@ class PhotoLibraryService: ObservableObject {
 
     // MARK: - Score a single asset using IQA + heuristics
     func score(asset: PHAsset) async -> ScoreResult {
-        return await withCheckedContinuation { cont in
-            let opts = PHImageRequestOptions()
-            opts.deliveryMode = .opportunistic
-            opts.isSynchronous = false
-            opts.isNetworkAccessAllowed = true
-
-            // 384×384 is sufficient for blur/exposure/Vision — 64% fewer pixels than 640×640
-            PHImageManager.default().requestImage(
-                for: asset,
-                targetSize: CGSize(width: 384, height: 384),
-                contentMode: .aspectFit,
-                options: opts
-            ) { image, info in
-                let isDegraded = (info?[PHImageResultIsDegradedKey] as? Bool) == true
-                if isDegraded { return }
-                guard let image = image, let cgImage = image.cgImage else {
-                    cont.resume(returning: ScoreResult(
-                        score: 50,
-                        isBlurry: false,
-                        isOverExposed: false,
-                        isUnderExposed: false,
-                        hasFaces: false,
-                        isShaky: false,
-                        isFocusFailed: false
-                    ))
-                    return
-                }
-                let result = Self.computeScore(cgImage: cgImage, asset: asset)
-                cont.resume(returning: result)
-            }
+        guard let image = await requestImageWithTimeout(
+            for: asset,
+            targetSize: CGSize(width: 384, height: 384),
+            contentMode: .aspectFit,
+            timeout: imageRequestTimeout
+        ), let cgImage = image.cgImage else {
+            return ScoreResult(
+                score: 50,
+                isBlurry: false,
+                isOverExposed: false,
+                isUnderExposed: false,
+                hasFaces: false,
+                isShaky: false,
+                isFocusFailed: false
+            )
         }
+        return Self.computeScore(cgImage: cgImage, asset: asset)
     }
 
     struct ScoreResult: Sendable {
@@ -626,63 +613,45 @@ class PhotoLibraryService: ObservableObject {
 
     // MARK: - Perceptual hash helpers
     private func perceptualHash(for asset: PHAsset) async -> UInt64? {
-        await withCheckedContinuation { cont in
-            let opts = PHImageRequestOptions()
-            opts.deliveryMode = .fastFormat
-            opts.resizeMode = .fast
-            opts.isSynchronous = false
-            opts.isNetworkAccessAllowed = true
-
-            PHImageManager.default().requestImage(
-                for: asset,
-                targetSize: CGSize(width: ScoringConfig.hashThumbnailWidth, height: ScoringConfig.hashThumbnailHeight),
-                contentMode: .aspectFit,
-                options: opts
-            ) { image, info in
-                let isDegraded = (info?[PHImageResultIsDegradedKey] as? Bool) == true
-                if isDegraded { return }
-                guard let cg = image?.cgImage else {
-                    cont.resume(returning: nil)
-                    return
-                }
-                cont.resume(returning: Self.dHash(cgImage: cg))
+        guard let image = await requestImageWithTimeout(
+            for: asset,
+            targetSize: CGSize(width: ScoringConfig.hashThumbnailWidth, height: ScoringConfig.hashThumbnailHeight),
+            contentMode: .aspectFit,
+            timeout: imageRequestTimeout,
+            configure: { opts in
+                opts.deliveryMode = .fastFormat
+                opts.resizeMode = .fast
             }
+        ), let cg = image.cgImage else {
+            return nil
         }
+        return Self.dHash(cgImage: cg)
     }
 
     private func featurePrint(for asset: PHAsset) async -> VNFeaturePrintObservation? {
-        await withCheckedContinuation { cont in
-            let opts = PHImageRequestOptions()
-            opts.deliveryMode = .highQualityFormat
-            opts.resizeMode = .exact
-            opts.isSynchronous = false
-            opts.isNetworkAccessAllowed = true
-
-            PHImageManager.default().requestImage(
-                for: asset,
-                targetSize: CGSize(
-                    width: ScoringConfig.featurePrintInputSize,
-                    height: ScoringConfig.featurePrintInputSize
-                ),
-                contentMode: .aspectFit,
-                options: opts
-            ) { image, info in
-                let isDegraded = (info?[PHImageResultIsDegradedKey] as? Bool) == true
-                if isDegraded { return }
-                guard let cg = image?.cgImage else {
-                    cont.resume(returning: nil)
-                    return
-                }
-
-                let req = VNGenerateImageFeaturePrintRequest()
-                let handler = VNImageRequestHandler(cgImage: cg, options: [:])
-                do {
-                    try handler.perform([req])
-                    cont.resume(returning: req.results?.first as? VNFeaturePrintObservation)
-                } catch {
-                    cont.resume(returning: nil)
-                }
+        guard let image = await requestImageWithTimeout(
+            for: asset,
+            targetSize: CGSize(
+                width: ScoringConfig.featurePrintInputSize,
+                height: ScoringConfig.featurePrintInputSize
+            ),
+            contentMode: .aspectFit,
+            timeout: imageRequestTimeout,
+            configure: { opts in
+                opts.deliveryMode = .highQualityFormat
+                opts.resizeMode = .exact
             }
+        ), let cg = image.cgImage else {
+            return nil
+        }
+
+        let req = VNGenerateImageFeaturePrintRequest()
+        let handler = VNImageRequestHandler(cgImage: cg, options: [:])
+        do {
+            try handler.perform([req])
+            return req.results?.first as? VNFeaturePrintObservation
+        } catch {
+            return nil
         }
     }
 
@@ -774,22 +743,81 @@ class PhotoLibraryService: ObservableObject {
     }
 
     private func requestCGImage(asset: PHAsset, targetSize: CGSize) async -> CGImage? {
+        let image = await requestImageWithTimeout(
+            for: asset,
+            targetSize: targetSize,
+            contentMode: .aspectFit,
+            timeout: imageRequestTimeout,
+            configure: { opts in
+                opts.deliveryMode = .highQualityFormat
+                opts.resizeMode = .fast
+            }
+        )
+        return image?.cgImage
+    }
+
+    private func requestImageWithTimeout(
+        for asset: PHAsset,
+        targetSize: CGSize,
+        contentMode: PHImageContentMode,
+        timeout: TimeInterval,
+        configure: ((PHImageRequestOptions) -> Void)? = nil
+    ) async -> UIImage? {
         await withCheckedContinuation { cont in
+            let manager = PHImageManager.default()
             let opts = PHImageRequestOptions()
-            opts.deliveryMode = .highQualityFormat
+            opts.deliveryMode = .opportunistic
             opts.resizeMode = .fast
             opts.isSynchronous = false
             opts.isNetworkAccessAllowed = true
+            configure?(opts)
 
-            PHImageManager.default().requestImage(
+            let lock = NSLock()
+            var finished = false
+            var requestID: PHImageRequestID = PHInvalidImageRequestID
+            var timeoutTask: Task<Void, Never>?
+
+            func finish(_ image: UIImage?) {
+                lock.lock()
+                guard !finished else {
+                    lock.unlock()
+                    return
+                }
+                finished = true
+                let id = requestID
+                let timer = timeoutTask
+                lock.unlock()
+
+                timer?.cancel()
+                if id != PHInvalidImageRequestID {
+                    manager.cancelImageRequest(id)
+                }
+                cont.resume(returning: image)
+            }
+
+            requestID = manager.requestImage(
                 for: asset,
                 targetSize: targetSize,
-                contentMode: .aspectFit,
+                contentMode: contentMode,
                 options: opts
             ) { image, info in
+                if (info?[PHImageCancelledKey] as? Bool) == true {
+                    finish(nil)
+                    return
+                }
+                if info?[PHImageErrorKey] != nil {
+                    finish(nil)
+                    return
+                }
                 let isDegraded = (info?[PHImageResultIsDegradedKey] as? Bool) == true
                 if isDegraded { return }
-                cont.resume(returning: image?.cgImage)
+                finish(image)
+            }
+
+            let timeoutNs = UInt64(max(timeout, 1) * 1_000_000_000)
+            timeoutTask = Task(priority: .utility) {
+                try? await Task.sleep(nanoseconds: timeoutNs)
+                finish(nil)
             }
         }
     }
