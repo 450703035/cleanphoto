@@ -121,15 +121,20 @@ enum L10n {
     static var smartSuggestions: String { isEn ? "Smart Suggestions · Tap to Enter" : "智能建议 · 点击进入" }
     static var duplicateAndSimilar: String { isEn ? "Duplicates & Similar" : "重复与相似照片" }
     static func dupDesc(_ dup: Int, _ sim: Int) -> String { isEn ? "\(dup) duplicate · \(sim) similar groups" : "\(dup)组重复 · \(sim)组相似" }
+    static func dupDescPhotos(_ photoCount: Int, _ groupCount: Int) -> String {
+        isEn ? "\(photoCount) photos in \(groupCount) groups" : "\(photoCount)张照片，\(groupCount)组"
+    }
     static var screenshotClean: String { isEn ? "Screenshot Cleanup" : "截图清理" }
     static func screenshotDesc(_ n: Int) -> String { isEn ? "\(n) screenshots · Auto analyzed" : "\(n)张截图 · 已自动分析" }
+    static var temporaryRecords: String { isEn ? "Temporary Records" : "临时记录" }
+    static func temporaryDesc(_ n: Int) -> String { isEn ? "\(n) utility photos · likely one-time use" : "\(n)张工具性照片 · 多为一次性记录" }
     static var largeVideos: String { isEn ? "Large Videos" : "大视频文件" }
     static func videoDesc(_ n: Int) -> String { isEn ? "\(n) videos, sorted by size" : "\(n)个视频，按大小排序" }
     static var lowQualityPhotos: String { isEn ? "Low Quality Photos" : "低质量照片" }
     static func lowQualityDesc(_ n: Int) -> String { isEn ? "Blurry/Shaky/Exposure/Focus failed \(n)" : "模糊/抖动/曝光/对焦失败 \(n)张" }
     static var otherBehavior: String { isEn ? "Other Behavior" : "其他使用行为" }
     static func behaviorDesc(_ frozenCount: Int) -> String {
-        isEn ? "\(frozenCount) photos untouched for years" : "\(frozenCount) 张照片多年没动过"
+        isEn ? "\(frozenCount) remaining photos" : "\(frozenCount) 张其余照片"
     }
     static var favoritePhotos: String { isEn ? "Favorites" : "收藏照片" }
     static func favoriteDesc(_ n: Int) -> String { isEn ? "\(n) · Not selected by default" : "\(n)张 · 默认不选择" }
@@ -319,6 +324,10 @@ enum L10n {
     static var screenshotTitle: String { isEn ? "Screenshot Cleanup" : "截图清理" }
     static func screenshotSubtitle(_ total: Int, _ rec: Int) -> String { isEn ? "\(total) · Recommend delete \(rec)" : "\(total)张 · 推荐删 \(rec)张" }
     static var autoSelectedLow: String { isEn ? "Low quality screenshots auto-selected, adjust manually" : "已自动选中低质量截图，可手动调整" }
+    static func temporaryDone(_ n: Int) -> String { isEn ? "\(n) temporary records" : "\(n)张临时记录" }
+    static var temporaryTitle: String { isEn ? "Temporary Records" : "临时记录" }
+    static func temporarySubtitle(_ total: Int, _ rec: Int) -> String { isEn ? "\(total) · Recommend delete \(rec)" : "\(total)张 · 推荐删 \(rec)张" }
+    static var temporaryBanner: String { isEn ? "Utility photos (receipts, docs, whiteboards, QR, notes) are usually one-time captures" : "工具性照片（收据、文档、白板、二维码、备注）通常是一次性记录，可优先清理" }
     static var all: String { isEn ? "All" : "全部" }
     static func classifying(_ pct: Int) -> String { isEn ? "Classifying \(pct)%" : "分类中 \(pct)%" }
     static func videosDone(_ n: Int) -> String { isEn ? "\(n) videos" : "\(n)个视频" }
@@ -356,6 +365,10 @@ enum L10n {
     static var listMode: String { isEn ? "List" : "列表" }
     static var calendarMode: String { isEn ? "Calendar" : "日历" }
     static var waterfallMode: String { isEn ? "Waterfall" : "瀑布" }
+    static var filterAll: String { isEn ? "All" : "全部" }
+    static var filterPhotos: String { isEn ? "Photos" : "照片" }
+    static var filterLive: String { isEn ? "Live" : "动图" }
+    static var filterVideos: String { isEn ? "Videos" : "视频" }
     static func yearLabel(_ y: Int) -> String { isEn ? "\(y)" : "\(y)年" }
     static var legendFew: String { isEn ? "Few" : "少" }
     static var legendMedium: String { isEn ? "Med" : "中" }
@@ -386,6 +399,8 @@ enum L10n {
     static var infoFormat: String { isEn ? "Format" : "格式" }
     static var infoTime: String { isEn ? "Time" : "时间" }
     static var infoLocation: String { isEn ? "Location" : "地点" }
+    static var infoResolution: String { isEn ? "Resolution" : "分辨率" }
+    static var infoFrameRate: String { isEn ? "FPS" : "帧率" }
 
     // MARK: Month formatting
     static func monthLabel(_ m: Int) -> String {

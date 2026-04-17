@@ -36,6 +36,7 @@ final class DatabaseService: @unchecked Sendable {
                 is_over_exposed  INTEGER NOT NULL DEFAULT 0,
                 is_under_exposed INTEGER NOT NULL DEFAULT 0,
                 has_faces        INTEGER NOT NULL DEFAULT 0,
+                is_utility       INTEGER NOT NULL DEFAULT 0,
                 file_size_bytes  INTEGER,
                 scored_at        INTEGER NOT NULL
             );
@@ -95,6 +96,9 @@ final class DatabaseService: @unchecked Sendable {
         if !columnExists(table: "photo_scores", column: "file_size_bytes") {
             sqlite3_exec(db, "ALTER TABLE photo_scores ADD COLUMN file_size_bytes INTEGER", nil, nil, nil)
         }
+        if !columnExists(table: "photo_scores", column: "is_utility") {
+            sqlite3_exec(db, "ALTER TABLE photo_scores ADD COLUMN is_utility INTEGER NOT NULL DEFAULT 0", nil, nil, nil)
+        }
     }
 
     // MARK: - Queue helper
@@ -127,6 +131,7 @@ final class DatabaseService: @unchecked Sendable {
         let isOverExposed: Bool
         let isUnderExposed: Bool
         let hasFaces: Bool
+        let isUtility: Bool
         let fileSizeBytes: Int64?
     }
 
@@ -137,6 +142,7 @@ final class DatabaseService: @unchecked Sendable {
         let isOverExposed: Bool
         let isUnderExposed: Bool
         let hasFaces: Bool
+        let isUtility: Bool
         let fileSizeBytes: Int64?
     }
 
@@ -154,7 +160,7 @@ final class DatabaseService: @unchecked Sendable {
             let chunk = Array(ids[offset..<min(offset + chunkSize, ids.count)])
             let ph = chunk.map { _ in "?" }.joined(separator: ",")
             let sql = """
-                SELECT local_id, score, is_blurry, is_over_exposed, is_under_exposed, has_faces, file_size_bytes
+                SELECT local_id, score, is_blurry, is_over_exposed, is_under_exposed, has_faces, is_utility, file_size_bytes
                 FROM photo_scores WHERE local_id IN (\(ph))
             """
             var stmt: OpaquePointer?
@@ -170,7 +176,8 @@ final class DatabaseService: @unchecked Sendable {
                         isOverExposed:   sqlite3_column_int(stmt, 3) != 0,
                         isUnderExposed:  sqlite3_column_int(stmt, 4) != 0,
                         hasFaces:        sqlite3_column_int(stmt, 5) != 0,
-                        fileSizeBytes:   sqlite3_column_type(stmt, 6) == SQLITE_NULL ? nil : sqlite3_column_int64(stmt, 6)
+                        isUtility:       sqlite3_column_int(stmt, 6) != 0,
+                        fileSizeBytes:   sqlite3_column_type(stmt, 7) == SQLITE_NULL ? nil : sqlite3_column_int64(stmt, 7)
                     )
                 }
                 sqlite3_finalize(stmt)
@@ -188,8 +195,8 @@ final class DatabaseService: @unchecked Sendable {
         guard !entries.isEmpty else { return }
         let sql = """
             INSERT OR REPLACE INTO photo_scores
-                (local_id, score, is_blurry, is_over_exposed, is_under_exposed, has_faces, file_size_bytes, scored_at)
-            VALUES (?,?,?,?,?,?,?,?)
+                (local_id, score, is_blurry, is_over_exposed, is_under_exposed, has_faces, is_utility, file_size_bytes, scored_at)
+            VALUES (?,?,?,?,?,?,?,?,?)
         """
         _ = withTransaction("saveScores") {
             var stmt: OpaquePointer?
@@ -207,12 +214,13 @@ final class DatabaseService: @unchecked Sendable {
                 sqlite3_bind_int(stmt,   4, e.isOverExposed   ? 1 : 0)
                 sqlite3_bind_int(stmt,   5, e.isUnderExposed  ? 1 : 0)
                 sqlite3_bind_int(stmt,   6, e.hasFaces        ? 1 : 0)
+                sqlite3_bind_int(stmt,   7, e.isUtility       ? 1 : 0)
                 if let size = e.fileSizeBytes {
-                    sqlite3_bind_int64(stmt, 7, size)
+                    sqlite3_bind_int64(stmt, 8, size)
                 } else {
-                    sqlite3_bind_null(stmt, 7)
+                    sqlite3_bind_null(stmt, 8)
                 }
-                sqlite3_bind_int64(stmt, 8, now)
+                sqlite3_bind_int64(stmt, 9, now)
                 guard sqlite3_step(stmt) == SQLITE_DONE else {
                     logSQLiteError("step saveScores")
                     return false

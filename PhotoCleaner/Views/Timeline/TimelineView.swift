@@ -9,12 +9,51 @@ struct TimelineView: View {
     @EnvironmentObject var vm: LibraryViewModel
     @EnvironmentObject var scanVM: ScanViewModel
     @State private var viewMode: TimelineMode = .list
+    @State private var mediaFilter: MediaKindFilter = .all
     @State private var selectedFolder: AlbumFolder? = nil
     @State private var selectedDay: DayInfo? = nil
     @State private var calendarYear: Int = Calendar.current.component(.year, from: Date())
     @State private var isListNearTail = false
+    @State private var filterSyncTask: Task<Void, Never>?
 
     enum TimelineMode { case list, calendar, waterfall }
+
+    enum MediaKindFilter: Hashable {
+        case all, photos, live, videos
+
+        var label: String {
+            switch self {
+            case .all:    return L10n.filterAll
+            case .photos: return L10n.filterPhotos
+            case .live:   return L10n.filterLive
+            case .videos: return L10n.filterVideos
+            }
+        }
+
+        var systemIcon: String {
+            switch self {
+            case .all:    return "square.grid.2x2"
+            case .photos: return "photo"
+            case .live:   return "livephoto"
+            case .videos: return "video"
+            }
+        }
+
+        func includes(_ asset: PhotoAsset) -> Bool {
+            let phAsset = asset.asset
+            switch self {
+            case .all:
+                return true
+            case .photos:
+                return phAsset.mediaType == .image &&
+                    !phAsset.mediaSubtypes.contains(.photoLive)
+            case .live:
+                return phAsset.mediaSubtypes.contains(.photoLive)
+            case .videos:
+                return phAsset.mediaType == .video
+            }
+        }
+    }
 
     private var showNotScannedState: Bool {
         scanVM.phase == .idle
@@ -58,6 +97,10 @@ struct TimelineView: View {
                 guard scanVM.phase == .scanning else { return }
                 Task { await syncTimelineFromScanState() }
             }
+            .onChange(of: mediaFilter) { _ in
+                filterSyncTask?.cancel()
+                filterSyncTask = Task { await syncTimelineFromScanState(forceApply: true) }
+            }
             .onAppear {
                 vm.setTimelineInteractionActive(true)
                 scanVM.setDetailInteraction(true)
@@ -98,6 +141,10 @@ struct TimelineView: View {
                 .padding(.horizontal)
                 .padding(.top, 16)
                 .padding(.bottom, 8)
+
+                MediaFilterBar(selection: $mediaFilter)
+                    .padding(.horizontal)
+                    .padding(.bottom, 8)
 
                 if scanVM.isBackgroundAnalyzing || scanVM.phase == .scanning {
                     VStack(spacing: 4) {
@@ -141,20 +188,31 @@ struct TimelineView: View {
                     CalendarContainerView(vm: vm, onDayTap: { selectedDay = $0 },
                                          visibleYear: $calendarYear)
                 } else {
-                    TimelineWaterfallView(vm: vm)
+                    TimelineWaterfallView(vm: vm, scrollScopeID: mediaFilter)
                 }
             }
         }
     }
 
-    private func syncTimelineFromScanState() async {
+    private func syncTimelineFromScanState(forceApply: Bool = false) async {
         switch scanVM.phase {
         case .idle:
             vm.clearTimeline()
         case .scanning:
             if scanVM.timelineCanShowAssets {
-                let incoming = scanVM.timelineVisibleAssets
-                guard !incoming.isEmpty else { return }
+                let raw = scanVM.timelineVisibleAssets
+                guard !raw.isEmpty else { return }
+                let filter = mediaFilter
+                let incoming: [PhotoAsset] = await Task.detached(priority: .userInitiated) {
+                    raw.filter { filter.includes($0) }
+                }.value
+                guard !Task.isCancelled else { return }
+
+                // Filter switch: always re-apply so the timeline reflects the new kind.
+                if forceApply {
+                    await vm.applyScannedSubset(incoming)
+                    return
+                }
 
                 // First reveal after the 20s gate.
                 if vm.allAssets.isEmpty && shouldApplySnapshot(incoming) {
@@ -181,7 +239,16 @@ struct TimelineView: View {
                 vm.clearTimeline()
             }
         case .done:
-            let incoming = scanVM.allAssets
+            let raw = scanVM.allAssets
+            let filter = mediaFilter
+            let incoming: [PhotoAsset] = await Task.detached(priority: .userInitiated) {
+                raw.filter { filter.includes($0) }
+            }.value
+            guard !Task.isCancelled else { return }
+            if forceApply {
+                await vm.applyScannedSubset(incoming)
+                return
+            }
             guard shouldApplySnapshot(incoming) else { return }
             await vm.applyScannedSubset(incoming)
         }
@@ -194,6 +261,50 @@ struct TimelineView: View {
         if incoming.first?.id != vm.allAssets.first?.id { return true }
         if incoming.last?.id != vm.allAssets.last?.id { return true }
         return false
+    }
+}
+
+private struct MediaFilterBar: View {
+    @Binding var selection: TimelineView.MediaKindFilter
+
+    private let options: [TimelineView.MediaKindFilter] = [.all, .photos, .live, .videos]
+
+    var body: some View {
+        HStack(spacing: 8) {
+            ForEach(options, id: \.self) { option in
+                let isSelected = (option == selection)
+                Button {
+                    if selection != option {
+                        withAnimation(.easeInOut(duration: 0.18)) {
+                            selection = option
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: option.systemIcon)
+                            .font(.system(size: 11, weight: .semibold))
+                        Text(option.label)
+                            .font(.system(size: 13, weight: .medium))
+                    }
+                    .foregroundColor(isSelected ? .white : AppColors.textSecondary)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(
+                        Capsule()
+                            .fill(isSelected ? AppColors.lightPurple : AppColors.cardBG)
+                    )
+                    .overlay(
+                        Capsule()
+                            .stroke(
+                                isSelected ? Color.clear : AppColors.textSecondary.opacity(0.18),
+                                lineWidth: 0.5
+                            )
+                    )
+                }
+                .buttonStyle(.plain)
+            }
+            Spacer(minLength: 0)
+        }
     }
 }
 
@@ -596,6 +707,7 @@ struct TimelineListView: View {
 
 struct TimelineWaterfallView: View {
     @ObservedObject var vm: LibraryViewModel
+    let scrollScopeID: TimelineView.MediaKindFilter
     @State private var assets: [PhotoAsset] = []
     @State private var sectionLayouts: [WaterfallSectionLayout] = []
     @State private var cachedItemWidth: CGFloat = 0
@@ -647,7 +759,7 @@ struct TimelineWaterfallView: View {
                                                     asset: $assets[idx],
                                                     itemWidth: colWidth,
                                                     isVideoPlaying: playingVideoAssetID == assets[idx].id,
-                                                    onPhotoTap: { toggle(index: idx) },
+                                                    onPhotoTap: { handlePhotoTap(at: idx) },
                                                     onVideoPlayToggle: {
                                                         if playingVideoAssetID == assets[idx].id {
                                                             playingVideoAssetID = nil
@@ -656,6 +768,11 @@ struct TimelineWaterfallView: View {
                                                         }
                                                     },
                                                     onVideoSelectToggle: { toggle(index: idx) },
+                                                    onVideoPlaybackStopped: {
+                                                        if playingVideoAssetID == assets[idx].id {
+                                                            playingVideoAssetID = nil
+                                                        }
+                                                    },
                                                     onLongPress: { requestDeleteAsset(at: idx) },
                                                     onDoubleTap: { viewerRequest = PhotoViewerRequest(startIndex: idx) }
                                                 )
@@ -670,7 +787,7 @@ struct TimelineWaterfallView: View {
                                                     asset: $assets[idx],
                                                     itemWidth: colWidth,
                                                     isVideoPlaying: playingVideoAssetID == assets[idx].id,
-                                                    onPhotoTap: { toggle(index: idx) },
+                                                    onPhotoTap: { handlePhotoTap(at: idx) },
                                                     onVideoPlayToggle: {
                                                         if playingVideoAssetID == assets[idx].id {
                                                             playingVideoAssetID = nil
@@ -679,6 +796,11 @@ struct TimelineWaterfallView: View {
                                                         }
                                                     },
                                                     onVideoSelectToggle: { toggle(index: idx) },
+                                                    onVideoPlaybackStopped: {
+                                                        if playingVideoAssetID == assets[idx].id {
+                                                            playingVideoAssetID = nil
+                                                        }
+                                                    },
                                                     onLongPress: { requestDeleteAsset(at: idx) },
                                                     onDoubleTap: { viewerRequest = PhotoViewerRequest(startIndex: idx) }
                                                 )
@@ -707,6 +829,7 @@ struct TimelineWaterfallView: View {
                     }
                     .padding(.bottom, selected.isEmpty ? 20 : 90)
                 }
+                .id(scrollScopeID)
                 .onAppear {
                     updateLayoutWidthIfNeeded(colWidth, force: true)
                 }
@@ -772,6 +895,13 @@ struct TimelineWaterfallView: View {
     }
 
     private func syncFromAssets(_ source: [PhotoAsset]) {
+        if let id = playingVideoAssetID, !source.contains(where: { $0.id == id }) {
+            playingVideoAssetID = nil
+        }
+        applySourceAssets(source)
+    }
+
+    private func applySourceAssets(_ source: [PhotoAsset]) {
         assets = source.map { asset in
             var a = asset
             // Waterfall mode defaults to unselected unless user explicitly toggled.
@@ -787,6 +917,13 @@ struct TimelineWaterfallView: View {
         guard assets.indices.contains(index) else { return }
         assets[index].isSelected.toggle()
         vm.selectionOverrides[assets[index].id] = assets[index].isSelected
+    }
+
+    private func handlePhotoTap(at index: Int) {
+        if playingVideoAssetID != nil {
+            playingVideoAssetID = nil
+        }
+        toggle(index: index)
     }
 
     private func requestDeleteAsset(at index: Int) {
@@ -832,6 +969,9 @@ struct TimelineWaterfallView: View {
     private func markScrollInteracting() {
         if !isScrollInteracting {
             isScrollInteracting = true
+        }
+        if playingVideoAssetID != nil {
+            playingVideoAssetID = nil
         }
         scrollIdleTask?.cancel()
     }
@@ -914,10 +1054,14 @@ private struct TimelineWaterfallCell: View {
     let onPhotoTap: () -> Void
     let onVideoPlayToggle: () -> Void
     let onVideoSelectToggle: () -> Void
+    let onVideoPlaybackStopped: () -> Void
     let onLongPress: () -> Void
     let onDoubleTap: () -> Void
     @State private var player: AVPlayer?
     @State private var loadingPlayer = false
+    @State private var resolvedPlaceName: String? = nil
+    @State private var playbackGeneration: Int = 0
+    @State private var loadPlayerTask: Task<Void, Never>? = nil
 
     private var mediaHeight: CGFloat {
         let w = CGFloat(max(1, asset.asset.pixelWidth))
@@ -969,7 +1113,7 @@ private struct TimelineWaterfallCell: View {
                         .font(.system(size: 10, weight: .semibold))
                         .foregroundColor(AppColors.textPrimary)
                         .lineLimit(1)
-                    Text(locationText(asset.asset))
+                    Text(secondaryFooterText)
                         .font(.system(size: 9))
                         .foregroundColor(AppColors.textSecondary)
                         .lineLimit(1)
@@ -988,18 +1132,59 @@ private struct TimelineWaterfallCell: View {
             }
         }
         .frame(width: itemWidth)
-        .onChange(of: isVideoPlaying) { playing in
+        .task(id: isVideoPlaying) {
             guard asset.asset.mediaType == .video else { return }
-            if playing {
-                Task { await ensurePlayerReadyAndPlay() }
+            if isVideoPlaying {
+                ensurePlayerReadyAndPlay()
             } else {
-                player?.pause()
+                stopPlayback()
             }
         }
         .onDisappear {
+            let hadResolvedPlayer = (player != nil)
+            invalidatePendingPlayback()
+            loadPlayerTask?.cancel()
+            loadPlayerTask = nil
             player?.pause()
-            if !isVideoPlaying { player = nil }
+            player = nil
+            loadingPlayer = false
+            // Cell can transiently disappear during LazyVStack relayout while a
+            // video request is still loading. In that case, keep parent play-id
+            // so the remounted cell can resume request/play.
+            if isVideoPlaying && hadResolvedPlayer { onVideoPlaybackStopped() }
         }
+        .task(id: asset.id) {
+            guard asset.asset.mediaType == .video else { return }
+            await resolvePlaceName()
+        }
+    }
+
+    private var secondaryFooterText: String {
+        if asset.asset.mediaType == .video {
+            let place = resolvedPlaceName ?? L10n.locating
+            return "\(resolutionText(asset.asset)) · \(place)"
+        }
+        return locationText(asset.asset)
+    }
+
+    private func resolutionText(_ asset: PHAsset) -> String {
+        let w = asset.pixelWidth, h = asset.pixelHeight
+        guard w > 0, h > 0 else { return L10n.unknown }
+        return "\(w)×\(h)"
+    }
+
+    private func resolvePlaceName() async {
+        let loc: CLLocation? = await withCheckedContinuation { cont in
+            DispatchQueue.global(qos: .utility).async {
+                cont.resume(returning: asset.asset.location)
+            }
+        }
+        guard let loc else {
+            await MainActor.run { resolvedPlaceName = L10n.noLocation }
+            return
+        }
+        let place = await LocationResolver.shared.resolve(loc)
+        await MainActor.run { resolvedPlaceName = place }
     }
 
     private func videoDuration(_ secs: TimeInterval) -> String {
@@ -1029,8 +1214,7 @@ private struct TimelineWaterfallCell: View {
     private var videoContent: some View {
         ZStack {
             if isVideoPlaying, let player {
-                VideoPlayer(player: player)
-                    .onAppear { player.play() }
+                InlineVideoPlayer(player: player)
             } else {
                 PhotoThumbnail(asset: asset.asset, size: itemWidth, height: mediaHeight, contentMode: .fill)
                     .overlay(
@@ -1068,32 +1252,63 @@ private struct TimelineWaterfallCell: View {
         }
     }
 
-    private func ensurePlayerReadyAndPlay() async {
+    private func ensurePlayerReadyAndPlay() {
+        invalidatePendingPlayback()
         if let player {
             player.play()
             return
         }
+
         loadingPlayer = true
-        if let avAsset = await requestVideoAsset(for: asset.asset) {
-            let item = AVPlayerItem(asset: avAsset)
-            let newPlayer = AVPlayer(playerItem: item)
+        let generation = playbackGeneration
+        let currentAsset = asset.asset
+
+        loadPlayerTask?.cancel()
+        loadPlayerTask = Task {
+            let playerItem = await requestVideoPlayerItem(for: currentAsset)
+            guard !Task.isCancelled else { return }
+
             await MainActor.run {
-                self.player = newPlayer
-                self.loadingPlayer = false
+                guard generation == playbackGeneration else {
+                    loadingPlayer = false
+                    return
+                }
+                guard isVideoPlaying else {
+                    loadingPlayer = false
+                    return
+                }
+                guard let playerItem else {
+                    loadingPlayer = false
+                    return
+                }
+
+                let newPlayer = AVPlayer(playerItem: playerItem)
+                player = newPlayer
+                loadingPlayer = false
                 newPlayer.play()
             }
-        } else {
-            await MainActor.run { self.loadingPlayer = false }
         }
     }
 
-    private func requestVideoAsset(for asset: PHAsset) async -> AVAsset? {
+    private func stopPlayback() {
+        invalidatePendingPlayback()
+        loadPlayerTask?.cancel()
+        loadPlayerTask = nil
+        player?.pause()
+        loadingPlayer = false
+    }
+
+    private func invalidatePendingPlayback() {
+        playbackGeneration &+= 1
+    }
+
+    private func requestVideoPlayerItem(for asset: PHAsset) async -> AVPlayerItem? {
         await withCheckedContinuation { cont in
             let opts = PHVideoRequestOptions()
             opts.deliveryMode = .automatic
             opts.isNetworkAccessAllowed = true
-            PHImageManager.default().requestAVAsset(forVideo: asset, options: opts) { avAsset, _, _ in
-                cont.resume(returning: avAsset)
+            PHImageManager.default().requestPlayerItem(forVideo: asset, options: opts) { item, _ in
+                cont.resume(returning: item)
             }
         }
     }
@@ -2169,13 +2384,22 @@ private struct FullScreenAssetInfoBar: View {
     let asset: PHAsset
     var onMask: Bool = false
     @State private var locationText: String = L10n.locating
+    @State private var frameRateText: String = "—"
     @Environment(\.colorScheme) private var colorScheme
+
+    private var isVideo: Bool { asset.mediaType == .video }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 10) {
                 infoText("\(L10n.infoSize) \(assetFileSizeText(asset))")
                 infoText("\(L10n.infoFormat) \(assetFormat(asset))")
+            }
+            if isVideo {
+                HStack(spacing: 10) {
+                    infoText("\(L10n.infoResolution) \(resolutionText(asset))")
+                    infoText("\(L10n.infoFrameRate) \(frameRateText)")
+                }
             }
             HStack(spacing: 10) {
                 infoText("\(L10n.infoTime) \(captureTimeText(asset))")
@@ -2188,6 +2412,42 @@ private struct FullScreenAssetInfoBar: View {
         .background(onMask ? Color.clear : Color.black.opacity(0.65))
         .cornerRadius(onMask ? 0 : 12)
         .task(id: asset.localIdentifier) { await resolveLocation() }
+        .task(id: asset.localIdentifier) {
+            if isVideo { await resolveFrameRate() } else { frameRateText = "—" }
+        }
+    }
+
+    private func resolutionText(_ asset: PHAsset) -> String {
+        let w = asset.pixelWidth
+        let h = asset.pixelHeight
+        guard w > 0, h > 0 else { return L10n.unknown }
+        return "\(w)×\(h)"
+    }
+
+    private func resolveFrameRate() async {
+        let opts = PHVideoRequestOptions()
+        opts.deliveryMode = .fastFormat
+        opts.isNetworkAccessAllowed = true
+        let avAsset: AVAsset? = await withCheckedContinuation { cont in
+            PHImageManager.default().requestAVAsset(forVideo: asset, options: opts) { av, _, _ in
+                cont.resume(returning: av)
+            }
+        }
+        guard let av = avAsset else {
+            frameRateText = L10n.unknown
+            return
+        }
+        let tracks = (try? await av.loadTracks(withMediaType: .video)) ?? []
+        guard let track = tracks.first,
+              let fps = try? await track.load(.nominalFrameRate),
+              fps > 0 else {
+            frameRateText = L10n.unknown
+            return
+        }
+        let rounded = (fps - fps.rounded()).magnitude < 0.05
+            ? String(format: "%.0f", fps)
+            : String(format: "%.1f", fps)
+        frameRateText = "\(rounded) fps"
     }
 
     private func infoText(_ text: String) -> some View {
@@ -2202,13 +2462,87 @@ private struct FullScreenAssetInfoBar: View {
             locationText = L10n.noLocation
             return
         }
-        let geocoder = CLGeocoder()
-        if let marks = try? await geocoder.reverseGeocodeLocation(loc), let p = marks.first {
-            let parts = [p.locality ?? p.administrativeArea, p.country].compactMap { $0 }
-            locationText = parts.isEmpty ? L10n.unknownLocation : parts.joined(separator: ", ")
-        } else {
-            locationText = L10n.unknownLocation
+        locationText = await LocationResolver.shared.resolve(loc)
+    }
+}
+
+// MARK: - Inline video player (AVPlayerLayer, no AVPlayerViewController → no status-bar side-effects)
+
+private struct InlineVideoPlayer: UIViewRepresentable {
+    let player: AVPlayer
+
+    func makeUIView(context: Context) -> _PlayerView { _PlayerView() }
+
+    func updateUIView(_ uiView: _PlayerView, context: Context) {
+        uiView.setPlayer(player)
+    }
+
+    final class _PlayerView: UIView {
+        override class var layerClass: AnyClass { AVPlayerLayer.self }
+        private var playerLayer: AVPlayerLayer { layer as! AVPlayerLayer }
+
+        override init(frame: CGRect) {
+            super.init(frame: frame)
+            playerLayer.videoGravity = .resizeAspectFill
         }
+        required init?(coder: NSCoder) { fatalError() }
+
+        func setPlayer(_ player: AVPlayer) {
+            guard playerLayer.player !== player else { return }
+            playerLayer.player = player
+        }
+    }
+}
+
+// MARK: - Shared reverse-geocoder
+//
+// CLGeocoder enforces ~50 requests / 60s. A waterfall full of video cells used
+// to fire one request per cell concurrently, instantly tripping the throttle
+// and stalling the UI. This actor:
+//   • dedupes by quantized coordinates (~110m grid)
+//   • caches resolved place names for the session
+//   • serializes requests with a min spacing
+@MainActor
+final class LocationResolver {
+    static let shared = LocationResolver()
+
+    private var cache: [String: String] = [:]
+    private var inflight: [String: Task<String, Never>] = [:]
+    private var lastRequestAt: Date = .distantPast
+    private let minInterval: TimeInterval = 1.3
+    private let geocoder = CLGeocoder()
+
+    func resolve(_ location: CLLocation) async -> String {
+        let key = String(
+            format: "%.3f,%.3f",
+            location.coordinate.latitude,
+            location.coordinate.longitude
+        )
+        if let cached = cache[key] { return cached }
+        if let task = inflight[key] { return await task.value }
+
+        let task = Task { @MainActor [weak self] () -> String in
+            guard let self else { return L10n.unknownLocation }
+            let wait = self.minInterval - Date().timeIntervalSince(self.lastRequestAt)
+            if wait > 0 {
+                try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
+            }
+            self.lastRequestAt = Date()
+
+            let resolved: String
+            if let marks = try? await self.geocoder.reverseGeocodeLocation(location),
+               let p = marks.first {
+                let parts = [p.locality ?? p.administrativeArea, p.country].compactMap { $0 }
+                resolved = parts.isEmpty ? L10n.unknownLocation : parts.joined(separator: ", ")
+            } else {
+                resolved = L10n.unknownLocation
+            }
+            self.cache[key] = resolved
+            self.inflight.removeValue(forKey: key)
+            return resolved
+        }
+        inflight[key] = task
+        return await task.value
     }
 }
 

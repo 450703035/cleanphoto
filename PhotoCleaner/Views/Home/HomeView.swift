@@ -9,10 +9,14 @@ struct HomeView: View {
         NavigationStack(path: $navPath) {
             ZStack {
                 AppColors.darkBG.ignoresSafeArea()
-                switch vm.phase {
-                case .idle:    ScanIdleView(onStart: vm.startScan)
-                case .scanning: ScanningView(vm: vm)
-                case .done:    ResultDashboard(vm: vm, navPath: $navPath)
+                if vm.isInitialLaunchPreparing {
+                    LaunchPreparingView()
+                } else {
+                    switch vm.phase {
+                    case .idle:    ScanIdleView(onStart: vm.startScan)
+                    case .scanning: ScanningView(vm: vm)
+                    case .done:    ResultDashboard(vm: vm, navPath: $navPath)
+                    }
                 }
             }
             .navigationBarHidden(true)
@@ -29,6 +33,8 @@ struct HomeView: View {
             DuplicatesView(groups: vm.duplicateGroups + vm.similarGroups, vm: vm)
         case .screenshots:
             ScreenshotCleanView(assets: vm.screenshots, vm: vm)
+        case .temporaryRecords:
+            TemporaryRecordCleanView(assets: vm.temporaryRecords, vm: vm)
         case .videos:
             VideoCleanView(assets: vm.videos, vm: vm)
         case .lowQuality:
@@ -43,10 +49,26 @@ struct HomeView: View {
 
 // MARK: - Routes
 enum HomeRoute: Hashable {
-    case duplicates, screenshots, videos, lowQuality, favorites, behavior
+    case duplicates, screenshots, temporaryRecords, videos, lowQuality, favorites, behavior
 }
 
 // MARK: - Idle scan circle
+struct LaunchPreparingView: View {
+    var body: some View {
+        VStack(spacing: 12) {
+            ProgressView()
+                .tint(AppColors.purple)
+                .scaleEffect(1.1)
+            Text(L10n.aiClean)
+                .font(AppTypography.body.weight(.semibold))
+                .foregroundColor(AppColors.textPrimary)
+            Text(L10n.smartAnalyze)
+                .font(AppTypography.caption)
+                .foregroundColor(AppColors.textSecondary)
+        }
+    }
+}
+
 struct ScanIdleView: View {
     let onStart: () -> Void
     @State private var rotate = false
@@ -427,11 +449,16 @@ struct ResultDashboard: View {
                         .padding(.horizontal)
                         .padding(.top, 12)
 
+                    let duplicateAndSimilarGroups = vm.duplicateGroups + vm.similarGroups
+                    let duplicateAndSimilarPhotoCount = Set(
+                        duplicateAndSimilarGroups.flatMap { $0.assets.map(\.id) }
+                    ).count
+
                     SuggestionCard(icon: "arrow.triangle.2.circlepath", iconBg: AppColors.purple,
                                    title: L10n.duplicateAndSimilar,
-                                   desc: L10n.dupDesc(vm.duplicateGroups.count, vm.similarGroups.count),
+                                   desc: L10n.dupDescPhotos(duplicateAndSimilarPhotoCount, duplicateAndSimilarGroups.count),
                                    size: ByteCountFormatter.string(
-                                    fromByteCount: (vm.duplicateGroups + vm.similarGroups)
+                                    fromByteCount: duplicateAndSimilarGroups
                                         .flatMap { $0.assets.dropFirst() }
                                         .reduce(0) { $0 + $1.sizeBytes },
                                     countStyle: .file
@@ -443,6 +470,12 @@ struct ResultDashboard: View {
                                    desc: L10n.screenshotDesc(vm.screenshots.count),
                                    size: ByteCountFormatter.string(fromByteCount: vm.screenshots.reduce(0){$0+$1.sizeBytes}, countStyle: .file)) {
                         navPath.append(.screenshots)
+                    }
+                    SuggestionCard(icon: "doc.text.viewfinder", iconBg: AppColors.blue,
+                                   title: L10n.temporaryRecords,
+                                   desc: L10n.temporaryDesc(vm.temporaryRecords.count),
+                                   size: ByteCountFormatter.string(fromByteCount: vm.temporaryRecords.reduce(0){$0+$1.sizeBytes}, countStyle: .file)) {
+                        navPath.append(.temporaryRecords)
                     }
                     SuggestionCard(icon: "video.fill", iconBg: AppColors.amber,
                                    title: L10n.largeVideos,
@@ -458,7 +491,7 @@ struct ResultDashboard: View {
                     }
                     SuggestionCard(icon: "snowflake", iconBg: AppColors.amber,
                                    title: L10n.otherBehavior,
-                                   desc: L10n.behaviorDesc(vm.behaviorAssets.filter { $0.coldTier == .frozen }.count),
+                                   desc: L10n.behaviorDesc(vm.behaviorAssets.count),
                                    size: ByteCountFormatter.string(fromByteCount: vm.behaviorAssets.reduce(0){$0+$1.sizeBytes}, countStyle: .file)) {
                         navPath.append(.behavior)
                     }
@@ -534,6 +567,7 @@ struct SpaceBar: View {
                 HStack(spacing: 1) {
                     seg(summary.videoBytes,      color: AppColors.purple,  width: geo.size.width)
                     seg(summary.screenshotBytes, color: AppColors.red,     width: geo.size.width)
+                    seg(summary.utilityBytes,    color: AppColors.blue,    width: geo.size.width)
                     seg(summary.livePhotoBytes,  color: AppColors.amber,   width: geo.size.width)
                     seg(summary.photoBytes,      color: AppColors.green,   width: geo.size.width)
                     Rectangle().fill(AppColors.separator).cornerRadius(2)
@@ -547,6 +581,7 @@ struct SpaceBar: View {
                 ForEach([
                     (AppColors.purple, L10n.video),
                     (AppColors.red, L10n.screenshot),
+                    (AppColors.blue, L10n.temporaryRecords),
                     (AppColors.amber, "Live"),
                     (AppColors.green, L10n.photo)
                 ], id: \.1) { color, label in

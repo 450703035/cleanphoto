@@ -614,6 +614,185 @@ struct ScreenshotCleanView: View {
     }
 }
 
+// MARK: - Temporary records
+struct TemporaryRecordCleanView: View {
+    @State var assets: [PhotoAsset]
+    @ObservedObject var vm: ScanViewModel
+    @State private var viewerRequest: TemporaryRecordViewerRequest? = nil
+    @State private var gridColumnCount: Int = AppConfig.temporaryGridColumns
+    @State private var done = false
+    @State private var doneCount = 0
+    @State private var deleting = false
+    @State private var showBanner = true
+    @Environment(\.dismiss) var dismiss
+
+    private var cols: [GridItem] {
+        Array(repeating: GridItem(.flexible(), spacing: 3), count: gridColumnCount)
+    }
+    private var selected: [PhotoAsset] { assets.filter { $0.isSelected } }
+    private var recommendedCount: Int { assets.reduce(0) { $0 + ($1.score < 55 ? 1 : 0) } }
+    private var isAllSelected: Bool { !assets.isEmpty && assets.allSatisfy { $0.isSelected } }
+
+    var body: some View {
+        ZStack(alignment: .bottom) {
+            if done {
+                DoneView(count: doneCount, label: L10n.temporaryDone(doneCount)) { dismiss() }
+            } else {
+                VStack(spacing: 0) {
+                    SubScreenHeader(
+                        title: L10n.temporaryTitle,
+                        subtitle: L10n.temporarySubtitle(assets.count, recommendedCount),
+                        onBack: { dismiss() },
+                        trailing: AnyView(
+                            Button(isAllSelected ? L10n.deselectAll : L10n.selectAll) {
+                                let next = !isAllSelected
+                                for i in assets.indices { assets[i].isSelected = next }
+                            }
+                            .foregroundColor(AppColors.lightPurple)
+                            .font(AppTypography.body)
+                        )
+                    )
+
+                    if showBanner {
+                        InfoBanner(text: L10n.temporaryBanner, color: AppColors.blue)
+                            .transition(.opacity.combined(with: .move(edge: .top)))
+                    }
+
+                    ScrollView {
+                        Color.clear.frame(height: 0)
+                            .background(GeometryReader { geo in
+                                Color.clear.preference(key: BannerScrollOffsetKey.self,
+                                    value: geo.frame(in: .named("temporaryScroll")).minY)
+                            })
+                        LazyVGrid(columns: cols, spacing: 3) {
+                            ForEach(assets.indices, id: \.self) { idx in
+                                TemporaryRecordGridCell(
+                                    asset: $assets[idx],
+                                    onSingleTap: { assets[idx].isSelected.toggle() },
+                                    onDoubleTap: { viewerRequest = TemporaryRecordViewerRequest(startIndex: idx) }
+                                )
+                                .id(assets[idx].id)
+                            }
+                        }
+                        .padding(3)
+                        .padding(.bottom, 80)
+                    }
+                    .coordinateSpace(name: "temporaryScroll")
+                    .onPreferenceChange(BannerScrollOffsetKey.self) { offset in
+                        guard showBanner, offset < -10 else { return }
+                        withAnimation(.easeInOut(duration: 0.25)) {
+                            showBanner = false
+                        }
+                    }
+                    .simultaneousGesture(bannerHideGesture)
+                    .simultaneousGesture(gridPinchGesture)
+                    .animation(.easeInOut(duration: 0.18), value: gridColumnCount)
+                }
+                .background(AppColors.darkBG)
+
+                if !selected.isEmpty {
+                    BottomDeleteBar(
+                        count: selected.count,
+                        sizeLabel: ByteCountFormatter.string(fromByteCount: selected.reduce(0){$0+$1.sizeBytes}, countStyle: .file)
+                    ) {
+                        Task {
+                            deleting = true
+                            doneCount = selected.count
+                            try? await vm.deleteSelected(from: assets)
+                            deleting = false
+                            done = true
+                        }
+                    }
+                }
+            }
+        }
+        .navigationBarHidden(true)
+        .onAppear {
+            vm.setDetailInteraction(true)
+            assets.sort { lhs, rhs in
+                if lhs.score != rhs.score { return lhs.score < rhs.score }
+                return lhs.creationDate > rhs.creationDate
+            }
+        }
+        .onDisappear { vm.setDetailInteraction(false) }
+        .overlay(deleting ? ProgressView(L10n.processing).padding(24).background(AppColors.cardBG).cornerRadius(8) : nil)
+        .sheet(item: $viewerRequest) { request in
+            FullScreenPhotoViewer(assets: $assets, startIndex: request.startIndex)
+        }
+    }
+
+    private var bannerHideGesture: some Gesture {
+        DragGesture(minimumDistance: 6)
+            .onChanged { value in
+                guard showBanner, value.translation.height < -8 else { return }
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    showBanner = false
+                }
+            }
+    }
+
+    private var gridPinchGesture: some Gesture {
+        MagnificationGesture(minimumScaleDelta: 0.08)
+            .onEnded { value in
+                if value > 1.06 {
+                    setGridColumns(2)
+                } else if value < 0.94 {
+                    setGridColumns(3)
+                }
+            }
+    }
+
+    private func setGridColumns(_ newValue: Int) {
+        let clamped = min(3, max(2, newValue))
+        guard clamped != gridColumnCount else { return }
+        gridColumnCount = clamped
+        AppConfig.temporaryGridColumns = clamped
+    }
+}
+
+private struct TemporaryRecordGridCell: View {
+    @Binding var asset: PhotoAsset
+    let onSingleTap: () -> Void
+    let onDoubleTap: () -> Void
+
+    var body: some View {
+        ZStack {
+            PhotoThumbnail(asset: asset.asset, size: 120)
+                .frame(maxWidth: .infinity)
+                .aspectRatio(1, contentMode: .fill)
+                .clipped()
+                .cornerRadius(10)
+
+            VStack {
+                HStack {
+                    ScoreBadge(score: asset.score)
+                    Spacer()
+                    cornerMetaText(asset.formattedSize, fontSize: 8)
+                }
+                Spacer()
+                HStack {
+                    cornerMetaText(L10n.temporaryRecords, fontSize: 8)
+                    Spacer()
+                    SelectionStatusBadge(isSelected: asset.isSelected, size: 20)
+                }
+            }
+            .padding(4)
+
+            if asset.isSelected {
+                RoundedRectangle(cornerRadius: 10).fill(Color.black.opacity(0.22))
+            }
+        }
+        .contentShape(Rectangle())
+        .onTapGesture(count: 2) { onDoubleTap() }
+        .onTapGesture { onSingleTap() }
+    }
+}
+
+private struct TemporaryRecordViewerRequest: Identifiable {
+    let id = UUID()
+    let startIndex: Int
+}
+
 // MARK: - Videos
 struct VideoCleanView: View {
     @State var assets: [PhotoAsset]

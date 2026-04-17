@@ -227,6 +227,13 @@ enum AppConfig {
         }
         set { UserDefaults.standard.set(min(3, max(2, newValue)), forKey: "lowQualityGridColumns") }
     }
+    static var temporaryGridColumns: Int {
+        get {
+            let v = UserDefaults.standard.object(forKey: "temporaryGridColumns") as? Int ?? 3
+            return min(3, max(2, v))
+        }
+        set { UserDefaults.standard.set(min(3, max(2, newValue)), forKey: "temporaryGridColumns") }
+    }
 }
 
 // MARK: - Scoring and clustering config

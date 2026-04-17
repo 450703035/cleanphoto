@@ -5,6 +5,7 @@ import Combine
 @MainActor
 class ScanViewModel: ObservableObject {
     @Published var phase: ScanPhase = .idle
+    @Published private(set) var isInitialLaunchPreparing: Bool = true
     @Published var progress: Double = 0
     @Published var phaseLabel: String = L10n.scanPhase1
     @Published var analyzedCount: Int = 0
@@ -22,6 +23,7 @@ class ScanViewModel: ObservableObject {
     @Published var duplicateGroups: [PhotoGroup] = []
     @Published var similarGroups:   [PhotoGroup] = []
     @Published var screenshots:     [PhotoAsset] = []
+    @Published var temporaryRecords: [PhotoAsset] = []
     @Published var videos:          [PhotoAsset] = []
     @Published var lowQuality:      [PhotoAsset] = []
     @Published var favorites:       [PhotoAsset] = []
@@ -96,7 +98,7 @@ class ScanViewModel: ObservableObject {
     /// - only check existence for previously scanned photos
     func startIncrementalSyncOnAppLaunchIfNeeded() {
         guard launchIncrementalSyncTask == nil else { return }
-        guard phase == .idle, !isBackgroundAnalyzing else { return }
+        guard (phase == .idle || phase == .done), !isBackgroundAnalyzing else { return }
         let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
         guard status == .authorized || status == .limited else { return }
         launchIncrementalSyncTask = Task(priority: .utility) { [weak self] in
@@ -115,7 +117,13 @@ class ScanViewModel: ObservableObject {
     /// Loads the last scan results from the local database without re-scanning.
     /// Call this when the view appears so results are available immediately.
     func loadCachedResultsIfAvailable() async {
-        guard phase == .idle else { return }
+        let shouldEndInitialPreparing = isInitialLaunchPreparing
+        defer {
+            if shouldEndInitialPreparing {
+                isInitialLaunchPreparing = false
+            }
+        }
+        guard phase != .scanning else { return }
 
         // Requires photo library authorization
         let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
@@ -138,6 +146,7 @@ class ScanViewModel: ObservableObject {
             if let c = cached[a.id] {
                 a.score = c.score
                 a.isSelected = LibraryViewModel.shouldAutoSelect(score: c.score, hasFaces: c.hasFaces)
+                a.isUtility = c.isUtility
                 a.fileSizeBytes = c.fileSizeBytes ?? metadata[a.id]?.fileSizeBytes
             } else if let m = metadata[a.id] {
                 a.fileSizeBytes = m.fileSizeBytes
@@ -155,11 +164,25 @@ class ScanViewModel: ObservableObject {
         let (dups, sims) = rebuildGroups(from: rows, assetMap: assetMap)
         let nonFavorite = scored.filter { !$0.asset.isFavorite }
         duplicateGroups = dups.map { filteredGroupExcludingFavorites($0) }.filter { $0.assets.count >= 2 }
-        similarGroups   = sims.map { filteredGroupExcludingFavorites($0) }.filter { $0.assets.count >= 2 }
+        let duplicateIDsFromCache = Set(duplicateGroups.flatMap { $0.assets.map(\.id) })
+        similarGroups = sims.compactMap { g -> PhotoGroup? in
+            let filtered = filteredGroupExcludingFavorites(g)
+            let kept = filtered.assets.filter { !duplicateIDsFromCache.contains($0.id) }
+            guard kept.count >= 2 else { return nil }
+            return PhotoGroup(assets: kept, groupType: .similar)
+        }
+        let groupedIDs = Set((duplicateGroups + similarGroups).flatMap { $0.assets.map(\.id) })
+        let secondaryAssets = nonFavorite.filter { !groupedIDs.contains($0.id) }
 
-        screenshots = nonFavorite.filter { $0.asset.mediaSubtypes.contains(.photoScreenshot) }
+        screenshots = secondaryAssets.filter { $0.asset.mediaSubtypes.contains(.photoScreenshot) }
             .map { var a = $0; a.isSelected = a.score < 45; return a }
-        videos = nonFavorite.filter { $0.asset.mediaType == .video }
+        temporaryRecords = secondaryAssets.filter { $0.isUtility && !$0.asset.mediaSubtypes.contains(.photoScreenshot) }
+            .map { var a = $0; a.isSelected = a.score < 55; return a }
+            .sorted {
+                if $0.score != $1.score { return $0.score < $1.score }
+                return $0.creationDate > $1.creationDate
+            }
+        videos = secondaryAssets.filter { $0.asset.mediaType == .video }
             .sorted { $0.sizeBytes > $1.sizeBytes }
             .map { var a = $0; a.isSelected = false; return a }
         let qualityMap: [String: PhotoLibraryService.QualitySignals] = cached.mapValues {
@@ -171,13 +194,14 @@ class ScanViewModel: ObservableObject {
                 isUnderExposed: $0.isUnderExposed
             )
         }
-        lowQuality = service.findLowQuality(assets: nonFavorite, qualityMap: qualityMap)
+        lowQuality = service.findLowQuality(assets: secondaryAssets, qualityMap: qualityMap)
         behaviorAssets = buildBehaviorAssets(
-            from: nonFavorite,
+            from: secondaryAssets,
             excludingIDs: occupiedAssetIDsForOtherCategories(
                 duplicateGroups: duplicateGroups,
                 similarGroups: similarGroups,
                 screenshots: screenshots,
+                temporaryRecords: temporaryRecords,
                 videos: videos,
                 lowQuality: lowQuality
             )
@@ -197,6 +221,10 @@ class ScanViewModel: ObservableObject {
 
     func startScan() {
         guard phase != .scanning else { return }
+        // Enter scanning UI immediately to avoid perceived tap lag.
+        phase = .scanning
+        phaseLabel = L10n.scanRequestAuth
+        progress = 0
         scanTask = Task { [weak self] in
             guard let self else { return }
             defer {
@@ -220,7 +248,7 @@ class ScanViewModel: ObservableObject {
         backgroundProgress = 0
         backgroundLabel = ""
         duplicateGroups = []; similarGroups = []
-        screenshots = []; videos = []; lowQuality = []; favorites = []; behaviorAssets = []; allAssets = []
+        screenshots = []; temporaryRecords = []; videos = []; lowQuality = []; favorites = []; behaviorAssets = []; allAssets = []
         timelineVisibleAssets = []
         timelineCanShowAssets = false
     }
@@ -233,6 +261,7 @@ class ScanViewModel: ObservableObject {
     /// If the app was backgrounded/locked and scan workers got interrupted,
     /// automatically restart scanning when returning to foreground.
     func resumeScanningIfNeededAfterAppBecameActive() {
+        service.resetTransientDecodeFailures()
         let scanInterrupted = (scanTask == nil)
         let deepInterrupted = isBackgroundAnalyzing && (backgroundAnalysisTask == nil)
 
@@ -250,18 +279,24 @@ class ScanViewModel: ObservableObject {
         }
 
         if phase == .done, deepInterrupted {
-            phase = .scanning
-            phaseLabel = L10n.bgDeepAnalysis
-            scanTask = Task { [weak self] in
-                guard let self else { return }
-                defer {
-                    Task { @MainActor [weak self] in
-                        self?.scanTask = nil
-                    }
-                }
-                await self.runScan()
-            }
+            // Returning to foreground should never bounce users back to full-screen scan UI.
+            isBackgroundAnalyzing = false
+            backgroundProgress = 0
+            backgroundLabel = ""
         }
+
+        // Defensive recovery: if deep-analysis appears active when returning from
+        // background, restart the background catch-up path to avoid a stuck state.
+        if phase == .done, isBackgroundAnalyzing {
+            backgroundAnalysisTask?.cancel()
+            backgroundAnalysisTask = nil
+            isBackgroundAnalyzing = false
+            backgroundProgress = 0
+            backgroundLabel = ""
+        }
+
+        // On every foreground activation, silently catch up newly-added photos.
+        startIncrementalSyncOnAppLaunchIfNeeded()
     }
 
     // MARK: - Scan
@@ -291,7 +326,15 @@ class ScanViewModel: ObservableObject {
         }
 
         phaseLabel = L10n.scanRequestAuth
-        authorized = await service.requestAuthorization()
+        let authStatus = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+        switch authStatus {
+        case .authorized, .limited:
+            authorized = true
+        case .notDetermined:
+            authorized = await service.requestAuthorization()
+        default:
+            authorized = false
+        }
         guard authorized else {
             scanClockTask?.cancel()
             phase = .idle
@@ -331,6 +374,7 @@ class ScanViewModel: ObservableObject {
             if let c = cached[a.id] {
                 a.score = c.score
                 a.isSelected = LibraryViewModel.shouldAutoSelect(score: c.score, hasFaces: c.hasFaces)
+                a.isUtility = c.isUtility
                 a.fileSizeBytes = c.fileSizeBytes ?? metadata[a.id]?.fileSizeBytes
             } else if let m = metadata[a.id] {
                 a.fileSizeBytes = m.fileSizeBytes
@@ -463,7 +507,7 @@ class ScanViewModel: ObservableObject {
         await withTaskGroup(of: (Int, PhotoLibraryService.ScoreResult).self) { group in
             func enqueueTasksIfNeeded() async {
                 // Keep UI responsive while users browse Timeline/Detail during deep scan.
-                let limit = await MainActor.run { self.isUserInteractingInDetail ? 2 : 4 }
+                let limit = await MainActor.run { self.isUserInteractingInDetail ? 1 : 2 }
                 while inFlight < limit && nextPos < uncached.count {
                     let i = uncached[nextPos]
                     let asset = raw[i].asset
@@ -485,6 +529,7 @@ class ScanViewModel: ObservableObject {
                     score: result.score,
                     hasFaces: result.hasFaces
                 )
+                scored[idx].isUtility = result.isUtility
                 if scannedIDs.insert(raw[idx].id).inserted {
                     localVisibleCount += 1
                 }
@@ -500,6 +545,7 @@ class ScanViewModel: ObservableObject {
                     isOverExposed:  result.isOverExposed,
                     isUnderExposed: result.isUnderExposed,
                     hasFaces:       result.hasFaces,
+                    isUtility:      result.isUtility,
                     fileSizeBytes:  scored[idx].fileSizeBytes
                 ))
                 qualityMap[raw[idx].id] = PhotoLibraryService.QualitySignals(
@@ -514,24 +560,6 @@ class ScanViewModel: ObservableObject {
                 let reachedInterval = now.timeIntervalSince(lastPublishedAt) >= publishInterval
                 let finished = localScoredCount >= total
                 if reachedInterval || finished {
-                    if !pendingSizeHydrationIndices.isEmpty {
-                        let uniquePending = Array(Set(pendingSizeHydrationIndices)).sorted()
-                        let pendingBatch = uniquePending.map { scored[$0] }
-                        let hydratedBatch = await service.populateFileSizes(for: pendingBatch, limit: pendingBatch.count)
-                        for (offset, index) in uniquePending.enumerated() {
-                            scored[index] = hydratedBatch[offset]
-                        }
-                        let sizeEntries: [DatabaseService.FileSizeEntry] = hydratedBatch.compactMap { item in
-                            guard let size = item.fileSizeBytes, size > 0 else { return nil }
-                            return DatabaseService.FileSizeEntry(localId: item.id, fileSizeBytes: size)
-                        }
-                        if !sizeEntries.isEmpty {
-                            await DatabaseService.shared.saveFileSizes(sizeEntries)
-                        }
-                        await DatabaseService.shared.upsertAssetMetadata(metadataEntries(from: hydratedBatch))
-                        pendingSizeHydrationIndices.removeAll()
-                    }
-
                     analyzedCount = (phase == .done) ? localScoredCount : localVisibleCount
                     backgroundProgress = 0.10 + (Double(localScoredCount) / Double(total)) * 0.45
                     progress = min(0.88, backgroundProgress)
@@ -587,35 +615,70 @@ class ScanViewModel: ObservableObject {
         }
 
         let nonFavorite = scored.filter { !$0.asset.isFavorite }
-        let newNonFavorite = nonFavorite.filter { newAssetIDs.contains($0.id) }
+
+        // Duplicate/similar feature extraction is the most decode-intensive phase.
+        // When users are actively browsing Timeline/Detail, pause here to avoid
+        // PhotoKit XPC overload (CMPhotoDecompressionSession / XPC interrupted).
+        await waitForDetailInteractionToEnd(maxWaitSeconds: 2.0)
+        guard !Task.isCancelled else {
+            isBackgroundAnalyzing = false
+            scanClockTask?.cancel()
+            return
+        }
 
         backgroundLabel = L10n.bgDuplicates
         backgroundProgress = 0.62
         progress = max(progress, 0.90)
-        let newDuplicateGroups = await service.findDuplicates(assets: newNonFavorite)
+        let duplicateCandidates = nonFavorite
+        let newDuplicateGroups = await service.findDuplicates(assets: duplicateCandidates)
+
+        await waitForDetailInteractionToEnd(maxWaitSeconds: 2.0)
+        guard !Task.isCancelled else {
+            isBackgroundAnalyzing = false
+            scanClockTask?.cancel()
+            return
+        }
 
         backgroundLabel = L10n.bgSimilar
         backgroundProgress = 0.74
         progress = max(progress, 0.93)
-        let newSimilarGroups = await service.findSimilar(assets: newNonFavorite)
+        let duplicateIDs = Set(newDuplicateGroups.flatMap { $0.assets.map(\.id) })
+        let similarCandidates = nonFavorite.filter { !duplicateIDs.contains($0.id) }
+        let newSimilarGroups = await service.findSimilar(assets: similarCandidates)
 
-        let mergedDuplicateGroups = mergeGroups(duplicateGroups + newDuplicateGroups)
-        let mergedSimilarGroups = mergeGroups(similarGroups + newSimilarGroups)
-        duplicateGroups = mergedDuplicateGroups
-        similarGroups = mergedSimilarGroups
+        // Duplicate/similar has highest priority: always rebuild from full current set.
+        duplicateGroups = mergeGroups(newDuplicateGroups)
+        similarGroups = mergeGroups(newSimilarGroups)
+        let groupedIDs = Set((duplicateGroups + similarGroups).flatMap { $0.assets.map(\.id) })
+        let secondaryAssets = nonFavorite.filter { !groupedIDs.contains($0.id) }
+        screenshots = secondaryAssets.filter { $0.asset.mediaSubtypes.contains(.photoScreenshot) }
+            .map { var a = $0; a.isSelected = a.score < 45; return a }
+        temporaryRecords = secondaryAssets.filter { $0.isUtility && !$0.asset.mediaSubtypes.contains(.photoScreenshot) }
+            .map { var a = $0; a.isSelected = a.score < 55; return a }
+            .sorted {
+                if $0.score != $1.score { return $0.score < $1.score }
+                return $0.creationDate > $1.creationDate
+            }
+        videos = secondaryAssets.filter { $0.asset.mediaType == .video }
+            .sorted { $0.sizeBytes > $1.sizeBytes }
+            .map { var a = $0; a.isSelected = false; return a }
+        favorites = scored
+            .filter { $0.asset.isFavorite }
+            .map { var a = $0; a.isSelected = false; return a }
 
         backgroundLabel = L10n.bgLowQuality
         backgroundProgress = 0.84
         progress = max(progress, 0.95)
-        lowQuality = service.findLowQuality(assets: nonFavorite, qualityMap: qualityMap)
+        lowQuality = service.findLowQuality(assets: secondaryAssets, qualityMap: qualityMap)
 
         // Rebuild behavior bucket using 6-category mutual exclusion.
         behaviorAssets = buildBehaviorAssets(
-            from: nonFavorite,
+            from: secondaryAssets,
             excludingIDs: occupiedAssetIDsForOtherCategories(
                 duplicateGroups: duplicateGroups,
                 similarGroups: similarGroups,
                 screenshots: screenshots,
+                temporaryRecords: temporaryRecords,
                 videos: videos,
                 lowQuality: lowQuality
             )
@@ -695,6 +758,7 @@ class ScanViewModel: ObservableObject {
             s.totalBytes += a.sizeBytes
             if a.asset.mediaType == .video { s.videoBytes += a.sizeBytes }
             else if a.asset.mediaSubtypes.contains(.photoScreenshot) { s.screenshotBytes += a.sizeBytes }
+            else if a.isUtility { s.utilityBytes += a.sizeBytes }
             else if a.asset.mediaSubtypes.contains(.photoLive) { s.livePhotoBytes += a.sizeBytes }
             else { s.photoBytes += a.sizeBytes }
             if a.isSelected { s.freeableBytes += a.sizeBytes }
@@ -744,6 +808,7 @@ class ScanViewModel: ObservableObject {
         duplicateGroups = duplicateGroups.compactMap(filteredGroup)
         similarGroups   = similarGroups.compactMap(filteredGroup)
         screenshots = screenshots.filter { !ids.contains($0.id) }
+        temporaryRecords = temporaryRecords.filter { !ids.contains($0.id) }
         videos      = videos.filter      { !ids.contains($0.id) }
         lowQuality  = lowQuality.filter  { !ids.contains($0.id) }
         favorites   = favorites.filter   { !ids.contains($0.id) }
@@ -768,6 +833,7 @@ class ScanViewModel: ObservableObject {
         let videosSnapshot = videos
         let behaviorSnapshot = behaviorAssets
         let screenshotsSnapshot = screenshots
+        let temporarySnapshot = temporaryRecords
         let lowQualitySnapshot = lowQuality
         let favoritesSnapshot = favorites
         let allAssetsSnapshot = allAssets
@@ -775,6 +841,7 @@ class ScanViewModel: ObservableObject {
         let newVideos = await service.populateFileSizes(for: videosSnapshot, limit: 600)
         let newBehavior = await service.populateFileSizes(for: behaviorSnapshot, limit: behaviorSnapshot.count)
         let newScreenshots = await service.populateFileSizes(for: screenshotsSnapshot, limit: 400)
+        let newTemporary = await service.populateFileSizes(for: temporarySnapshot, limit: 400)
         let newLowQuality = await service.populateFileSizes(for: lowQualitySnapshot, limit: 400)
         let newFavorites = await service.populateFileSizes(for: favoritesSnapshot, limit: 600)
         let newAllAssets = await service.populateFileSizes(for: allAssetsSnapshot, limit: allAssetsSnapshot.count)
@@ -782,13 +849,14 @@ class ScanViewModel: ObservableObject {
         videos = mergeFileSizes(into: videos, from: newVideos)
         behaviorAssets = mergeFileSizes(into: behaviorAssets, from: newBehavior)
         screenshots = mergeFileSizes(into: screenshots, from: newScreenshots)
+        temporaryRecords = mergeFileSizes(into: temporaryRecords, from: newTemporary)
         lowQuality = mergeFileSizes(into: lowQuality, from: newLowQuality)
         favorites = mergeFileSizes(into: favorites, from: newFavorites)
         allAssets = mergeFileSizes(into: allAssets, from: newAllAssets)
         buildSummary(assets: allAssets)
 
         // Persist hydrated file sizes so next app launch reads real values immediately.
-        let merged = newVideos + newBehavior + newScreenshots + newLowQuality + newFavorites + newAllAssets
+        let merged = newVideos + newBehavior + newScreenshots + newTemporary + newLowQuality + newFavorites + newAllAssets
         var seen = Set<String>()
         let fileSizeEntries: [DatabaseService.FileSizeEntry] = merged.compactMap { item in
             guard let size = item.fileSizeBytes, size > 0, !seen.contains(item.id) else { return nil }
@@ -846,21 +914,37 @@ class ScanViewModel: ObservableObject {
     private func buildBehaviorAssets(from nonFavoriteAssets: [PhotoAsset], excludingIDs: Set<String>) -> [PhotoAsset] {
         nonFavoriteAssets
             .filter { !excludingIDs.contains($0.id) }
-            .compactMap { asset -> PhotoAsset? in
-                guard let tier = Self.computeColdTier(asset: asset.asset) else { return nil }
+            .map { asset -> PhotoAsset in
                 var a = asset
-                a.coldTier = tier
-                // Frozen photos are auto-selected (suggest batch delete);
-                // cold photos require explicit user opt-in.
-                a.isSelected = (tier == .frozen)
+                if let tier = Self.computeColdTier(asset: asset.asset) {
+                    a.coldTier = tier
+                    // Frozen photos are auto-selected (suggest batch delete);
+                    // cold photos require explicit user opt-in.
+                    a.isSelected = (tier == .frozen)
+                } else {
+                    a.coldTier = nil
+                    a.isSelected = false
+                }
                 return a
             }
             .sorted { lhs, rhs in
-                // Frozen before cold; within same tier, oldest first
-                if lhs.coldTier != rhs.coldTier {
-                    return lhs.coldTier == .frozen
+                // Frozen first, then cold, then normal leftovers.
+                func rank(_ tier: ColdTier?) -> Int {
+                    switch tier {
+                    case .frozen: return 0
+                    case .cold: return 1
+                    case .none: return 2
+                    }
                 }
-                return lhs.creationDate < rhs.creationDate
+                let lr = rank(lhs.coldTier)
+                let rr = rank(rhs.coldTier)
+                if lr != rr { return lr < rr }
+                // Within same tier, oldest first.
+                if lhs.coldTier != nil || rhs.coldTier != nil {
+                    return lhs.creationDate < rhs.creationDate
+                }
+                // For normal leftovers, newer first for practical cleanup browsing.
+                return lhs.creationDate > rhs.creationDate
             }
     }
 
@@ -868,6 +952,7 @@ class ScanViewModel: ObservableObject {
         duplicateGroups: [PhotoGroup],
         similarGroups: [PhotoGroup],
         screenshots: [PhotoAsset],
+        temporaryRecords: [PhotoAsset],
         videos: [PhotoAsset],
         lowQuality: [PhotoAsset]
     ) -> Set<String> {
@@ -875,6 +960,7 @@ class ScanViewModel: ObservableObject {
         for group in duplicateGroups { for asset in group.assets { ids.insert(asset.id) } }
         for group in similarGroups { for asset in group.assets { ids.insert(asset.id) } }
         for asset in screenshots { ids.insert(asset.id) }
+        for asset in temporaryRecords { ids.insert(asset.id) }
         for asset in videos { ids.insert(asset.id) }
         for asset in lowQuality { ids.insert(asset.id) }
         return ids
@@ -959,27 +1045,41 @@ class ScanViewModel: ObservableObject {
             guard kept.count >= 2 else { return nil }
             return PhotoGroup(assets: kept, groupType: group.groupType)
         }
+        let duplicateIDs = Set(duplicateGroups.flatMap { $0.assets.map(\.id) })
         similarGroups = similarSeed.compactMap { group in
-            let kept = group.assets.filter { scannedIDs.contains($0.id) && !$0.asset.isFavorite }
+            let kept = group.assets.filter {
+                scannedIDs.contains($0.id) &&
+                !$0.asset.isFavorite &&
+                !duplicateIDs.contains($0.id)
+            }
             guard kept.count >= 2 else { return nil }
             return PhotoGroup(assets: kept, groupType: group.groupType)
         }
 
         let nonFavorite = subset.filter { !$0.asset.isFavorite }
-        screenshots = nonFavorite.filter { $0.asset.mediaSubtypes.contains(.photoScreenshot) }
+        let groupedIDs = Set((duplicateGroups + similarGroups).flatMap { $0.assets.map(\.id) })
+        let secondaryAssets = nonFavorite.filter { !groupedIDs.contains($0.id) }
+        screenshots = secondaryAssets.filter { $0.asset.mediaSubtypes.contains(.photoScreenshot) }
             .map { var a = $0; a.isSelected = a.score < 45; return a }
-        videos = nonFavorite.filter { $0.asset.mediaType == .video }
+        temporaryRecords = secondaryAssets.filter { $0.isUtility && !$0.asset.mediaSubtypes.contains(.photoScreenshot) }
+            .map { var a = $0; a.isSelected = a.score < 55; return a }
+            .sorted {
+                if $0.score != $1.score { return $0.score < $1.score }
+                return $0.creationDate > $1.creationDate
+            }
+        videos = secondaryAssets.filter { $0.asset.mediaType == .video }
             .sorted { $0.sizeBytes > $1.sizeBytes }
             .map { var a = $0; a.isSelected = false; return a }
         favorites = subset.filter { $0.asset.isFavorite }
             .map { var a = $0; a.isSelected = false; return a }
-        lowQuality = service.findLowQuality(assets: nonFavorite, qualityMap: qualityMap)
+        lowQuality = service.findLowQuality(assets: secondaryAssets, qualityMap: qualityMap)
         behaviorAssets = buildBehaviorAssets(
-            from: nonFavorite,
+            from: secondaryAssets,
             excludingIDs: occupiedAssetIDsForOtherCategories(
                 duplicateGroups: duplicateGroups,
                 similarGroups: similarGroups,
                 screenshots: screenshots,
+                temporaryRecords: temporaryRecords,
                 videos: videos,
                 lowQuality: lowQuality
             )
@@ -1029,7 +1129,17 @@ class ScanViewModel: ObservableObject {
     }
 
     private func performIncrementalLaunchSync() async {
-        guard phase == .idle, !isBackgroundAnalyzing else { return }
+        guard (phase == .idle || phase == .done), !isBackgroundAnalyzing else { return }
+        let startedFromDonePhase = (phase == .done)
+        let incrementalStart = Date()
+        var shouldResetBackgroundState = false
+        defer {
+            if shouldResetBackgroundState {
+                isBackgroundAnalyzing = false
+                backgroundProgress = 0
+                backgroundLabel = ""
+            }
+        }
 
         let raw = await service.fetchAllAssets()
         let currentIDs = Set(raw.map(\.id))
@@ -1055,6 +1165,13 @@ class ScanViewModel: ObservableObject {
         let newIDs = currentIDs.subtracting(scannedExistingIDs)
         guard !newIDs.isEmpty else { return }
 
+        if startedFromDonePhase {
+            isBackgroundAnalyzing = true
+            backgroundLabel = L10n.bgScoring
+            backgroundProgress = 0.05
+            shouldResetBackgroundState = true
+        }
+
         var newAssets = raw.filter { newIDs.contains($0.id) }
         var resultsByID: [String: PhotoLibraryService.ScoreResult] = [:]
 
@@ -1066,9 +1183,17 @@ class ScanViewModel: ObservableObject {
                 score: result.score,
                 hasFaces: result.hasFaces
             )
+            newAssets[i].isUtility = result.isUtility
             resultsByID[newAssets[i].id] = result
+            if startedFromDonePhase {
+                backgroundProgress = 0.05 + (Double(i + 1) / Double(max(newAssets.count, 1))) * 0.55
+            }
         }
 
+        if startedFromDonePhase {
+            backgroundLabel = L10n.bgSaving
+            backgroundProgress = 0.75
+        }
         newAssets = await service.populateFileSizes(for: newAssets, limit: newAssets.count)
 
         let scoreEntries: [DatabaseService.ScoreEntry] = newAssets.compactMap { asset in
@@ -1080,6 +1205,7 @@ class ScanViewModel: ObservableObject {
                 isOverExposed: result.isOverExposed,
                 isUnderExposed: result.isUnderExposed,
                 hasFaces: result.hasFaces,
+                isUtility: result.isUtility,
                 fileSizeBytes: asset.fileSizeBytes
             )
         }
@@ -1092,6 +1218,22 @@ class ScanViewModel: ObservableObject {
         await DatabaseService.shared.saveFileSizes(sizeEntries)
         await DatabaseService.shared.upsertAssetMetadata(metadataEntries(from: newAssets))
         await DatabaseService.shared.markAssetsScanned(Array(newIDs))
+
+        let elapsed = max(1, Int(Date().timeIntervalSince(incrementalStart)))
+        lastScanDurationSeconds = elapsed
+        scanElapsedSeconds = elapsed
+
+        if startedFromDonePhase {
+            // Refresh dashboard/category snapshots with newly scored assets while
+            // keeping users on the result page (no full-screen scan transition).
+            await loadCachedResultsIfAvailable()
+            await DatabaseService.shared.saveScanRecord(
+                summary: summary,
+                duplicateCount: duplicateGroups.count,
+                similarCount: similarGroups.count,
+                lowQualityCount: lowQuality.count
+            )
+        }
     }
 
     private func metadataEntries(from assets: [PhotoAsset]) -> [DatabaseService.AssetMetadataEntry] {
@@ -1103,6 +1245,13 @@ class ScanViewModel: ObservableObject {
                 pixelHeight: Int32(asset.asset.pixelHeight),
                 creationTimestamp: asset.asset.creationDate.map { Int64($0.timeIntervalSince1970) }
             )
+        }
+    }
+
+    private func waitForDetailInteractionToEnd(maxWaitSeconds: TimeInterval) async {
+        let deadline = Date().addingTimeInterval(max(0, maxWaitSeconds))
+        while isUserInteractingInDetail && !Task.isCancelled && Date() < deadline {
+            try? await Task.sleep(nanoseconds: 300_000_000)
         }
     }
 }

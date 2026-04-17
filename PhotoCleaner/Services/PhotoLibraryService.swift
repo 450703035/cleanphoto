@@ -10,6 +10,9 @@ class PhotoLibraryService: ObservableObject {
     static let shared = PhotoLibraryService()
     private init() {}
     private let imageRequestTimeout: TimeInterval = 12
+    private let decodeFailureTTL: TimeInterval = 180
+    private let decodeFailureLock = NSLock()
+    private var decodeFailedAssetIds: [String: Date] = [:]
 
     // MARK: - Permission
     func requestAuthorization() async -> Bool {
@@ -42,6 +45,33 @@ class PhotoLibraryService: ObservableObject {
         }.value
     }
 
+    private func hasDecodeFailed(assetId: String) -> Bool {
+        decodeFailureLock.lock()
+        let now = Date()
+        if let failedAt = decodeFailedAssetIds[assetId] {
+            let withinTTL = now.timeIntervalSince(failedAt) < decodeFailureTTL
+            if !withinTTL {
+                decodeFailedAssetIds.removeValue(forKey: assetId)
+            }
+            decodeFailureLock.unlock()
+            return withinTTL
+        }
+        decodeFailureLock.unlock()
+        return false
+    }
+
+    private func markDecodeFailed(assetId: String) {
+        decodeFailureLock.lock()
+        decodeFailedAssetIds[assetId] = Date()
+        decodeFailureLock.unlock()
+    }
+
+    func resetTransientDecodeFailures() {
+        decodeFailureLock.lock()
+        decodeFailedAssetIds.removeAll()
+        decodeFailureLock.unlock()
+    }
+
     // MARK: - Fill real file sizes in background (for visible subsets)
     func populateFileSizes(for assets: [PhotoAsset], limit: Int = 300) async -> [PhotoAsset] {
         await Task.detached(priority: .utility) {
@@ -62,6 +92,32 @@ class PhotoLibraryService: ObservableObject {
 
     // MARK: - Score a single asset using IQA + heuristics
     func score(asset: PHAsset) async -> ScoreResult {
+        // Performance fast-paths: videos and screenshots don't need IQA scoring.
+        if asset.mediaType == .video {
+            return ScoreResult(
+                score: 50,
+                isBlurry: false,
+                isOverExposed: false,
+                isUnderExposed: false,
+                hasFaces: false,
+                isUtility: false,
+                isShaky: false,
+                isFocusFailed: false
+            )
+        }
+        if asset.mediaSubtypes.contains(.photoScreenshot) {
+            return ScoreResult(
+                score: 30,
+                isBlurry: false,
+                isOverExposed: false,
+                isUnderExposed: false,
+                hasFaces: false,
+                isUtility: false,
+                isShaky: false,
+                isFocusFailed: false
+            )
+        }
+
         guard let image = await requestImageWithTimeout(
             for: asset,
             targetSize: CGSize(width: 384, height: 384),
@@ -74,6 +130,7 @@ class PhotoLibraryService: ObservableObject {
                 isOverExposed: false,
                 isUnderExposed: false,
                 hasFaces: false,
+                isUtility: false,
                 isShaky: false,
                 isFocusFailed: false
             )
@@ -87,6 +144,7 @@ class PhotoLibraryService: ObservableObject {
         let isOverExposed: Bool
         let isUnderExposed: Bool
         let hasFaces: Bool
+        let isUtility: Bool
         let isShaky: Bool
         let isFocusFailed: Bool
     }
@@ -145,6 +203,12 @@ class PhotoLibraryService: ObservableObject {
             obs.confidence > 0.4 && petKeywords.contains(where: { obs.identifier.lowercased().contains($0) })
         }
 
+        // ── Metadata flags ────────────────────────────────────────────────
+        let isScreenshot = asset.mediaSubtypes.contains(.photoScreenshot)
+        let isPanorama   = asset.mediaSubtypes.contains(.photoPanorama)
+        let isLivePhoto  = asset.mediaSubtypes.contains(.photoLive)
+        let isFav        = asset.isFavorite
+
         // ── Aesthetic score — iOS 18+ native model ────────────────────────
         // VNCalculateImageAestheticsScoresRequest is trained on aesthetic quality,
         // not content classification — overallScore ≈ −1…+1 (higher = better).
@@ -159,6 +223,21 @@ class PhotoLibraryService: ObservableObject {
             let clamped = Double(max(-1.0, min(1.0, obs.overallScore)))
             aestheticBonus = Int((clamped + 1.0) / 2.0 * 18.0) - 8
         }
+        if !isUtility, !isScreenshot {
+            // Fallback for iOS 16/17 where VNCalculateImageAestheticsScoresRequest is unavailable.
+            let utilityKeywords = [
+                "document", "receipt", "invoice", "text", "whiteboard", "paper",
+                "label", "barcode", "qr", "menu", "ticket", "business card"
+            ]
+            let looksLikeUtilityContent = classifications.contains { obs in
+                guard obs.confidence >= 0.25 else { return false }
+                let id = obs.identifier.lowercased()
+                return utilityKeywords.contains(where: { id.contains($0) })
+            }
+            if looksLikeUtilityContent, !hasFaces {
+                isUtility = utilityFallbackLooksOneTime(cgImage: cgImage)
+            }
+        }
 
         // ── Blur — texture-aware Laplacian (edge pixels only) ─────────────
         let blur           = textureAwareLaplacianVariance(cgImage: cgImage)
@@ -170,12 +249,6 @@ class PhotoLibraryService: ObservableObject {
 
         // ── Exposure — histogram-based (dark/bright pixel ratios) ─────────
         let (isUnderExposed, isOverExposed, isGoodExposure) = exposureFromHistogram(cgImage: cgImage)
-
-        // ── Metadata flags ────────────────────────────────────────────────
-        let isScreenshot = asset.mediaSubtypes.contains(.photoScreenshot)
-        let isPanorama   = asset.mediaSubtypes.contains(.photoPanorama)
-        let isLivePhoto  = asset.mediaSubtypes.contains(.photoLive)
-        let isFav        = asset.isFavorite
 
         var score = ScoringConfig.baseScore
 
@@ -220,6 +293,7 @@ class PhotoLibraryService: ObservableObject {
             isOverExposed: isOverExposed,
             isUnderExposed: isUnderExposed,
             hasFaces: hasFaces,
+            isUtility: isUtility,
             isShaky: isShaky,
             isFocusFailed: isFocusFailed
         )
@@ -353,6 +427,82 @@ class PhotoLibraryService: ObservableObject {
         return (isUnder, isOver, isGood)
     }
 
+    private static func utilityFallbackLooksOneTime(cgImage: CGImage) -> Bool {
+        if utilityContainsQRCode(cgImage: cgImage) { return true }
+
+        let stats = utilityTextStats(cgImage: cgImage)
+        guard stats.lineCount > 0 else { return false }
+
+        if stats.coverage >= 0.40, stats.lineCount >= 3 {
+            return true
+        }
+
+        let text = stats.textBlob
+        let receiptLikeKeywords = [
+            "receipt", "invoice", "total", "subtotal", "tax", "amount", "paid",
+            "收据", "发票", "合计", "小计", "税", "实付", "支付", "金额"
+        ]
+        let hitReceiptKeywords = receiptLikeKeywords.contains { text.contains($0) }
+        if hitReceiptKeywords, stats.coverage >= 0.18 {
+            return true
+        }
+
+        if utilityHasDocumentRectangle(cgImage: cgImage), stats.coverage >= 0.22 {
+            return true
+        }
+
+        return false
+    }
+
+    private static func utilityTextStats(cgImage: CGImage) -> (lineCount: Int, coverage: Double, textBlob: String) {
+        let req = VNRecognizeTextRequest()
+        req.recognitionLevel = .fast
+        req.usesLanguageCorrection = false
+        let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
+        try? handler.perform([req])
+
+        let observations = req.results ?? []
+        guard !observations.isEmpty else { return (0, 0, "") }
+
+        var coveredArea: Double = 0
+        var lines: [String] = []
+        lines.reserveCapacity(observations.count)
+        for obs in observations {
+            coveredArea += Double(obs.boundingBox.width * obs.boundingBox.height)
+            if let line = obs.topCandidates(1).first?.string.trimmingCharacters(in: .whitespacesAndNewlines),
+               !line.isEmpty {
+                lines.append(line.lowercased())
+            }
+        }
+        return (
+            lineCount: observations.count,
+            coverage: min(1.0, max(0.0, coveredArea)),
+            textBlob: lines.joined(separator: " ")
+        )
+    }
+
+    private static func utilityContainsQRCode(cgImage: CGImage) -> Bool {
+        let ci = CIImage(cgImage: cgImage)
+        let detector = CIDetector(
+            ofType: CIDetectorTypeQRCode,
+            context: nil,
+            options: [CIDetectorAccuracy: CIDetectorAccuracyLow]
+        )
+        let features = detector?.features(in: ci) ?? []
+        return !features.isEmpty
+    }
+
+    private static func utilityHasDocumentRectangle(cgImage: CGImage) -> Bool {
+        let req = VNDetectRectanglesRequest()
+        req.minimumAspectRatio = 0.5
+        req.maximumAspectRatio = 1.8
+        req.minimumConfidence = 0.45
+        req.maximumObservations = 3
+        let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
+        try? handler.perform([req])
+        return !(req.results ?? []).isEmpty
+    }
+
     // MARK: - Detect duplicates using feature print (with hash fallback)
     func findDuplicates(assets: [PhotoAsset]) async -> [PhotoGroup] {
         struct Candidate {
@@ -362,21 +512,44 @@ class PhotoLibraryService: ObservableObject {
             let fileSize: Int64
         }
 
-        let images = assets.filter { $0.asset.mediaType == .image }
+        let images = assets.filter {
+            $0.asset.mediaType == .image
+        }
         guard images.count > 1 else { return [] }
+
+        var result: [PhotoGroup] = []
+        var used = Set<String>()
+
+        // Fast path: exact metadata duplicates (same dimensions + same file size).
+        // This catches true file-level duplicates without costly image decoding.
+        var exactBuckets: [String: [PhotoAsset]] = [:]
+        for photo in images {
+            let fileSize = assetFileSize(photo.asset) ?? photo.sizeBytes
+            let key = "\(photo.asset.pixelWidth)x\(photo.asset.pixelHeight)-\(fileSize)"
+            exactBuckets[key, default: []].append(photo)
+        }
+        for bucket in exactBuckets.values where bucket.count > 1 {
+            let deduped = bucket.filter { !used.contains($0.id) }
+            guard deduped.count > 1 else { continue }
+            var sorted = deduped.sorted { $0.score > $1.score }
+            for idx in 1..<sorted.count { sorted[idx].isSelected = true }
+            for item in sorted { used.insert(item.id) }
+            result.append(PhotoGroup(assets: sorted, groupType: .duplicate))
+        }
 
         // Bucket by coarse temporal neighborhood + dimensions to reduce comparisons.
         var buckets: [String: [PhotoAsset]] = [:]
         for photo in images {
+            guard !used.contains(photo.id) else { continue }
             let ts = Int(photo.creationDate.timeIntervalSince1970 / ScoringConfig.duplicateCandidateTimeBucketSeconds)
             let key = "\(photo.asset.pixelWidth)x\(photo.asset.pixelHeight)-\(ts)"
             buckets[key, default: []].append(photo)
         }
 
-        var result: [PhotoGroup] = []
         for bucket in buckets.values where bucket.count > 1 {
             var candidates: [Candidate] = []
             for photo in bucket {
+                guard !used.contains(photo.id) else { continue }
                 let feature = await featurePrint(for: photo.asset)
                 let hash = await perceptualHash(for: photo.asset)
                 if feature == nil && hash == nil { continue }
@@ -385,7 +558,6 @@ class PhotoLibraryService: ObservableObject {
             }
             guard candidates.count > 1 else { continue }
 
-            var used = Set<String>()
             for i in candidates.indices {
                 let base = candidates[i]
                 guard !used.contains(base.asset.id) else { continue }
@@ -434,11 +606,37 @@ class PhotoLibraryService: ObservableObject {
             let hash: UInt64?
         }
 
-        let images = assets.filter { $0.asset.mediaType == .image }
+        let images = assets.filter {
+            $0.asset.mediaType == .image
+        }
         guard images.count > 1 else { return [] }
 
+        let sortedImages = images.sorted(by: { $0.creationDate < $1.creationDate })
+        // Only assets with near-by neighbors can be "similar bursts".
+        // This avoids decoding thousands of isolated photos.
+        var similarBurstCandidates: [PhotoAsset] = []
+        similarBurstCandidates.reserveCapacity(sortedImages.count / 3)
+        for idx in sortedImages.indices {
+            let current = sortedImages[idx]
+            let nearPrev: Bool = {
+                guard idx > sortedImages.startIndex else { return false }
+                let prev = sortedImages[sortedImages.index(before: idx)]
+                return current.creationDate.timeIntervalSince(prev.creationDate) <= ScoringConfig.similarCaptureGapSeconds
+            }()
+            let nearNext: Bool = {
+                guard idx < sortedImages.index(before: sortedImages.endIndex) else { return false }
+                let next = sortedImages[sortedImages.index(after: idx)]
+                return next.creationDate.timeIntervalSince(current.creationDate) <= ScoringConfig.similarCaptureGapSeconds
+            }()
+            if nearPrev || nearNext {
+                similarBurstCandidates.append(current)
+            }
+        }
+        guard similarBurstCandidates.count > 1 else { return [] }
+
         var candidates: [SimilarPhoto] = []
-        for photo in images.sorted(by: { $0.creationDate < $1.creationDate }) {
+        candidates.reserveCapacity(similarBurstCandidates.count)
+        for photo in similarBurstCandidates {
             let feature = await featurePrint(for: photo.asset)
             let hash = await perceptualHash(for: photo.asset)
             candidates.append(SimilarPhoto(photo: photo, feature: feature, hash: hash))
@@ -492,11 +690,13 @@ class PhotoLibraryService: ObservableObject {
         assets
             // Hard exclusions (same logic as screenshots):
             //   • Screenshots  → belong to Screenshot Cleanup
+            //   • Utility photos → belong to Temporary Records
             //   • Favourites   → user explicitly wants to keep them
             //   • hasAdjustments → user spent time editing; can't be a waste photo
             .filter {
                 $0.score < ScoringConfig.lowQualityThreshold &&
                 !$0.asset.mediaSubtypes.contains(.photoScreenshot) &&
+                !$0.isUtility &&
                 !$0.asset.isFavorite &&
                 !$0.asset.hasAdjustments
             }
@@ -763,7 +963,10 @@ class PhotoLibraryService: ObservableObject {
         timeout: TimeInterval,
         configure: ((PHImageRequestOptions) -> Void)? = nil
     ) async -> UIImage? {
-        await withCheckedContinuation { cont in
+        let assetId = asset.localIdentifier
+        if hasDecodeFailed(assetId: assetId) { return nil }
+
+        return await withCheckedContinuation { (cont: CheckedContinuation<UIImage?, Never>) in
             let manager = PHImageManager.default()
             let opts = PHImageRequestOptions()
             opts.deliveryMode = .opportunistic
@@ -806,6 +1009,12 @@ class PhotoLibraryService: ObservableObject {
                     return
                 }
                 if info?[PHImageErrorKey] != nil {
+                    self.markDecodeFailed(assetId: assetId)
+                    finish(nil)
+                    return
+                }
+                if image == nil,
+                   (info?[PHImageResultIsInCloudKey] as? Bool) == true {
                     finish(nil)
                     return
                 }
@@ -817,6 +1026,7 @@ class PhotoLibraryService: ObservableObject {
             let timeoutNs = UInt64(max(timeout, 1) * 1_000_000_000)
             timeoutTask = Task(priority: .utility) {
                 try? await Task.sleep(nanoseconds: timeoutNs)
+                self.markDecodeFailed(assetId: assetId)
                 finish(nil)
             }
         }

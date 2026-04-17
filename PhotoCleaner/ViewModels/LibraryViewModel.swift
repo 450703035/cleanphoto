@@ -185,6 +185,7 @@ class LibraryViewModel: ObservableObject {
             if let c = cached[a.id] {
                 a.score = c.score
                 a.isSelected = Self.shouldAutoSelect(score: c.score, hasFaces: c.hasFaces)
+                a.isUtility = c.isUtility
                 a.fileSizeBytes = c.fileSizeBytes ?? metadata[a.id]?.fileSizeBytes
             } else if let m = metadata[a.id] {
                 a.fileSizeBytes = m.fileSizeBytes
@@ -357,6 +358,7 @@ class LibraryViewModel: ObservableObject {
                     score: result.score,
                     hasFaces: result.hasFaces
                 )
+                assets[idx].isUtility = result.isUtility
                 entries.append(DatabaseService.ScoreEntry(
                     localId:        raw[idx].id,
                     score:          result.score,
@@ -364,6 +366,7 @@ class LibraryViewModel: ObservableObject {
                     isOverExposed:  result.isOverExposed,
                     isUnderExposed: result.isUnderExposed,
                     hasFaces:       result.hasFaces,
+                    isUtility:      result.isUtility,
                     fileSizeBytes:  assets[idx].fileSizeBytes
                 ))
                 enqueue()
