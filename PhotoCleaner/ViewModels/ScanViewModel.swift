@@ -71,6 +71,34 @@ class ScanViewModel: ObservableObject {
         }
     }
 
+    // MARK: - Scan stage logging
+
+    private static let scanLogDateFormatter: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+
+    private func logScan(_ message: String) {
+        print("[ScanPerf] \(message)")
+    }
+
+    @discardableResult
+    private func logStageStart(_ name: String) -> Date {
+        let startedAt = Date()
+        let startedAtText = Self.scanLogDateFormatter.string(from: startedAt)
+        logScan("START  \(name) at \(startedAtText)")
+        return startedAt
+    }
+
+    private func logStageEnd(_ name: String, startedAt: Date, status: String = "completed") {
+        let endedAt = Date()
+        let endedAtText = Self.scanLogDateFormatter.string(from: endedAt)
+        let elapsed = endedAt.timeIntervalSince(startedAt)
+        let elapsedText = String(format: "%.2f", elapsed)
+        logScan("END    \(name) at \(endedAtText), elapsed \(elapsedText)s, status=\(status)")
+    }
+
     // MARK: - Authorization
 
     /// Request photo-library permission as early as app launch (Home tab),
@@ -302,6 +330,15 @@ class ScanViewModel: ObservableObject {
     // MARK: - Scan
 
     private func runScan() async {
+        let totalStageStartedAt = logStageStart("Scan.Total")
+        defer {
+            logStageEnd(
+                "Scan.Total",
+                startedAt: totalStageStartedAt,
+                status: Task.isCancelled ? "cancelled" : "completed"
+            )
+        }
+
         metadataWarmupTask?.cancel()
         metadataWarmupTask = nil
         launchIncrementalSyncTask?.cancel()
@@ -326,6 +363,7 @@ class ScanViewModel: ObservableObject {
         }
 
         phaseLabel = L10n.scanRequestAuth
+        let authStageStartedAt = logStageStart("Scan.Auth")
         let authStatus = PHPhotoLibrary.authorizationStatus(for: .readWrite)
         switch authStatus {
         case .authorized, .limited:
@@ -335,6 +373,11 @@ class ScanViewModel: ObservableObject {
         default:
             authorized = false
         }
+        logStageEnd(
+            "Scan.Auth",
+            startedAt: authStageStartedAt,
+            status: authorized ? "authorized" : "denied"
+        )
         guard authorized else {
             scanClockTask?.cancel()
             phase = .idle
@@ -345,7 +388,13 @@ class ScanViewModel: ObservableObject {
         // Phase A: first-pass scan (target ~1 minute before showing dashboard)
         phaseLabel = L10n.scanPhaseA
         progress = 0.02
+        let fetchAssetsStageStartedAt = logStageStart("Scan.PhaseA.FetchAllAssets")
         let raw = await service.fetchAllAssets()
+        logStageEnd(
+            "Scan.PhaseA.FetchAllAssets",
+            startedAt: fetchAssetsStageStartedAt,
+            status: raw.isEmpty ? "empty" : "completed"
+        )
         guard !raw.isEmpty else {
             scanClockTask?.cancel()
             lastScanDurationSeconds = Int(Date().timeIntervalSince(scanStart))
@@ -355,6 +404,7 @@ class ScanViewModel: ObservableObject {
         allAssets = raw
         progress = 0.08
 
+        let loadCacheStageStartedAt = logStageStart("Scan.PhaseA.LoadCacheMetadata")
         let ids = raw.map { $0.id }
         let cached = await DatabaseService.shared.loadScores(for: ids)
         let metadata = await DatabaseService.shared.loadMetadata(for: ids)
@@ -367,6 +417,11 @@ class ScanViewModel: ObservableObject {
         }
         let alreadyScannedIds = activeScannedIds.union(cachedScannedIds)
         let newAssetIDs = Set(ids).subtracting(alreadyScannedIds)
+        logStageEnd(
+            "Scan.PhaseA.LoadCacheMetadata",
+            startedAt: loadCacheStageStartedAt,
+            status: "cached=\(cached.count),new=\(newAssetIDs.count)"
+        )
 
         // Apply cached scores immediately; uncached assets keep neutral score for quick display.
         var scored = raw.map { a -> PhotoAsset in
@@ -395,16 +450,19 @@ class ScanViewModel: ObservableObject {
             )
         }
 
+        let warmupStageStartedAt = logStageStart("Scan.PhaseA.WarmupMetadataBeforeReveal")
         let warmed = await warmupMetadataBeforeReveal(
             scoredAssets: scored,
             scannedIDs: scannedIDs,
             scanStart: scanStart
         )
+        logStageEnd("Scan.PhaseA.WarmupMetadataBeforeReveal", startedAt: warmupStageStartedAt)
         scored = warmed.scoredAssets
         scannedIDs = warmed.scannedIDs
         let warmedAssetMap = Dictionary(uniqueKeysWithValues: scored.map { ($0.id, $0) })
         let (warmedDup, warmedSim) = rebuildGroups(from: rows, assetMap: warmedAssetMap)
 
+        let publishStageStartedAt = logStageStart("Scan.PhaseA.PublishPartialResults")
         publishPartialResults(
             scoredAssets: scored,
             scannedIDs: scannedIDs,
@@ -413,8 +471,10 @@ class ScanViewModel: ObservableObject {
             similarSeed: warmedSim,
             elapsedSeconds: Int(Date().timeIntervalSince(scanStart))
         )
+        logStageEnd("Scan.PhaseA.PublishPartialResults", startedAt: publishStageStartedAt)
 
         // Phase B: deep pass in background (duplicates/similar/quality/size calibration)
+        let launchDeepScanStageStartedAt = logStageStart("Scan.PhaseB.LaunchBackgroundDeepScan")
         isBackgroundAnalyzing = true
         backgroundProgress = 0
         backgroundLabel = L10n.bgDeepAnalysis
@@ -438,9 +498,11 @@ class ScanViewModel: ObservableObject {
                 scanStart: scanStart
             )
         }
+        logStageEnd("Scan.PhaseB.LaunchBackgroundDeepScan", startedAt: launchDeepScanStageStartedAt)
 
         // For repeat scans (no new assets), don't keep users on a forced waiting screen.
         // Only keep a short settling window when we truly have new/uncached work.
+        let holdRevealStageStartedAt = logStageStart("Scan.PhaseA.HoldBeforeReveal")
         let minimumFirstPassSeconds = timelineRevealSeconds
         if minimumFirstPassSeconds > 0 {
             while !Task.isCancelled {
@@ -452,15 +514,22 @@ class ScanViewModel: ObservableObject {
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
             }
         }
+        logStageEnd(
+            "Scan.PhaseA.HoldBeforeReveal",
+            startedAt: holdRevealStageStartedAt,
+            status: minimumFirstPassSeconds > 0 ? "completed" : "skipped"
+        )
         guard !Task.isCancelled else {
             scanClockTask?.cancel()
             return
         }
+        let finalizeFirstPassStageStartedAt = logStageStart("Scan.PhaseA.FinalizeFirstPassUI")
         progress = max(progress, 0.6)
         phase = .done
         if !isBackgroundAnalyzing {
             finalizeScanDuration(scanStart: scanStart)
         }
+        logStageEnd("Scan.PhaseA.FinalizeFirstPassUI", startedAt: finalizeFirstPassStageStartedAt)
     }
 
     private func performBackgroundDeepScan(
@@ -474,6 +543,15 @@ class ScanViewModel: ObservableObject {
         newAssetIDs: Set<String>,
         scanStart: Date
     ) async {
+        let deepScanTotalStageStartedAt = logStageStart("Scan.PhaseB.DeepScan.Total")
+        defer {
+            logStageEnd(
+                "Scan.PhaseB.DeepScan.Total",
+                startedAt: deepScanTotalStageStartedAt,
+                status: Task.isCancelled ? "cancelled" : "completed"
+            )
+        }
+
         var scored = initialScored
         let total = max(raw.count, 1)
         let uncached = (0..<raw.count).filter { cached[raw[$0].id] == nil }
@@ -504,10 +582,11 @@ class ScanViewModel: ObservableObject {
         let publishInterval: TimeInterval = 3.0
         var pendingSizeHydrationIndices: [Int] = []
 
+        let scoringStageStartedAt = logStageStart("Scan.PhaseB.DeepScan.ScoringUncached")
         await withTaskGroup(of: (Int, PhotoLibraryService.ScoreResult).self) { group in
             func enqueueTasksIfNeeded() async {
                 // Keep UI responsive while users browse Timeline/Detail during deep scan.
-                let limit = await MainActor.run { self.isUserInteractingInDetail ? 1 : 2 }
+                let limit = await MainActor.run { self.isUserInteractingInDetail ? 2 : 4 }
                 while inFlight < limit && nextPos < uncached.count {
                     let i = uncached[nextPos]
                     let asset = raw[i].asset
@@ -577,6 +656,11 @@ class ScanViewModel: ObservableObject {
                 await enqueueTasksIfNeeded()
             }
         }
+        logStageEnd(
+            "Scan.PhaseB.DeepScan.ScoringUncached",
+            startedAt: scoringStageStartedAt,
+            status: "scored=\(localScoredCount)/\(total)"
+        )
 
         guard !Task.isCancelled else {
             isBackgroundAnalyzing = false
@@ -586,6 +670,7 @@ class ScanViewModel: ObservableObject {
 
         analyzedCount = localScoredCount
         if !pendingSizeHydrationIndices.isEmpty {
+            let hydrateStageStartedAt = logStageStart("Scan.PhaseB.DeepScan.HydratePendingFileSizes")
             let uniquePending = Array(Set(pendingSizeHydrationIndices)).sorted()
             let pendingBatch = uniquePending.map { scored[$0] }
             let hydratedBatch = await service.populateFileSizes(for: pendingBatch, limit: pendingBatch.count)
@@ -600,7 +685,14 @@ class ScanViewModel: ObservableObject {
                 await DatabaseService.shared.saveFileSizes(sizeEntries)
             }
             await DatabaseService.shared.upsertAssetMetadata(metadataEntries(from: hydratedBatch))
+            logStageEnd(
+                "Scan.PhaseB.DeepScan.HydratePendingFileSizes",
+                startedAt: hydrateStageStartedAt,
+                status: "assets=\(uniquePending.count)"
+            )
         }
+
+        let persistScoresStageStartedAt = logStageStart("Scan.PhaseB.DeepScan.SaveScoresAndScanState")
         publishPartialResults(
             scoredAssets: scored,
             scannedIDs: scannedIDs,
@@ -613,13 +705,20 @@ class ScanViewModel: ObservableObject {
         if !newAssetIDs.isEmpty {
             await DatabaseService.shared.markAssetsScanned(Array(newAssetIDs))
         }
+        logStageEnd(
+            "Scan.PhaseB.DeepScan.SaveScoresAndScanState",
+            startedAt: persistScoresStageStartedAt,
+            status: "entries=\(newEntries.count),newScanned=\(newAssetIDs.count)"
+        )
 
         let nonFavorite = scored.filter { !$0.asset.isFavorite }
 
         // Duplicate/similar feature extraction is the most decode-intensive phase.
         // When users are actively browsing Timeline/Detail, pause here to avoid
         // PhotoKit XPC overload (CMPhotoDecompressionSession / XPC interrupted).
+        let waitBeforeDupStageStartedAt = logStageStart("Scan.PhaseB.DeepScan.WaitBeforeDuplicates")
         await waitForDetailInteractionToEnd(maxWaitSeconds: 2.0)
+        logStageEnd("Scan.PhaseB.DeepScan.WaitBeforeDuplicates", startedAt: waitBeforeDupStageStartedAt)
         guard !Task.isCancelled else {
             isBackgroundAnalyzing = false
             scanClockTask?.cancel()
@@ -630,9 +729,24 @@ class ScanViewModel: ObservableObject {
         backgroundProgress = 0.62
         progress = max(progress, 0.90)
         let duplicateCandidates = nonFavorite
-        let newDuplicateGroups = await service.findDuplicates(assets: duplicateCandidates)
+        let duplicateStageStartedAt = logStageStart("Scan.PhaseB.DeepScan.FindDuplicates")
+        let newDuplicateGroups = await service.findDuplicates(assets: duplicateCandidates) { [weak self] stageProgress in
+            guard let self else { return }
+            let local = max(0, min(1, stageProgress))
+            let bg = 0.62 + local * 0.12   // 62% -> 74%
+            let fg = 0.90 + local * 0.03   // 90% -> 93%
+            if bg > self.backgroundProgress { self.backgroundProgress = bg }
+            if fg > self.progress { self.progress = fg }
+        }
+        logStageEnd(
+            "Scan.PhaseB.DeepScan.FindDuplicates",
+            startedAt: duplicateStageStartedAt,
+            status: "groups=\(newDuplicateGroups.count),candidates=\(duplicateCandidates.count)"
+        )
 
+        let waitBeforeSimilarStageStartedAt = logStageStart("Scan.PhaseB.DeepScan.WaitBeforeSimilar")
         await waitForDetailInteractionToEnd(maxWaitSeconds: 2.0)
+        logStageEnd("Scan.PhaseB.DeepScan.WaitBeforeSimilar", startedAt: waitBeforeSimilarStageStartedAt)
         guard !Task.isCancelled else {
             isBackgroundAnalyzing = false
             scanClockTask?.cancel()
@@ -644,7 +758,20 @@ class ScanViewModel: ObservableObject {
         progress = max(progress, 0.93)
         let duplicateIDs = Set(newDuplicateGroups.flatMap { $0.assets.map(\.id) })
         let similarCandidates = nonFavorite.filter { !duplicateIDs.contains($0.id) }
-        let newSimilarGroups = await service.findSimilar(assets: similarCandidates)
+        let similarStageStartedAt = logStageStart("Scan.PhaseB.DeepScan.FindSimilar")
+        let newSimilarGroups = await service.findSimilar(assets: similarCandidates) { [weak self] stageProgress in
+            guard let self else { return }
+            let local = max(0, min(1, stageProgress))
+            let bg = 0.74 + local * 0.10   // 74% -> 84%
+            let fg = 0.93 + local * 0.02   // 93% -> 95%
+            if bg > self.backgroundProgress { self.backgroundProgress = bg }
+            if fg > self.progress { self.progress = fg }
+        }
+        logStageEnd(
+            "Scan.PhaseB.DeepScan.FindSimilar",
+            startedAt: similarStageStartedAt,
+            status: "groups=\(newSimilarGroups.count),candidates=\(similarCandidates.count)"
+        )
 
         // Duplicate/similar has highest priority: always rebuild from full current set.
         duplicateGroups = mergeGroups(newDuplicateGroups)
@@ -669,6 +796,7 @@ class ScanViewModel: ObservableObject {
         backgroundLabel = L10n.bgLowQuality
         backgroundProgress = 0.84
         progress = max(progress, 0.95)
+        let classifyStageStartedAt = logStageStart("Scan.PhaseB.DeepScan.ClassifyAndCalibrate")
         lowQuality = service.findLowQuality(assets: secondaryAssets, qualityMap: qualityMap)
 
         // Rebuild behavior bucket using 6-category mutual exclusion.
@@ -693,6 +821,11 @@ class ScanViewModel: ObservableObject {
             return DatabaseService.FileSizeEntry(localId: item.id, fileSizeBytes: size)
         }
         await DatabaseService.shared.saveFileSizes(behaviorSizeEntries)
+        logStageEnd(
+            "Scan.PhaseB.DeepScan.ClassifyAndCalibrate",
+            startedAt: classifyStageStartedAt,
+            status: "lowQuality=\(lowQuality.count),behavior=\(behaviorAssets.count)"
+        )
 
         allAssets = scored
         store.setAssets(scored)
@@ -701,6 +834,7 @@ class ScanViewModel: ObservableObject {
         backgroundLabel = L10n.bgSaving
         backgroundProgress = 0.95
         progress = max(progress, 0.97)
+        let persistFinalStageStartedAt = logStageStart("Scan.PhaseB.DeepScan.PersistGroupsAndRecord")
         await DatabaseService.shared.saveGroups(duplicateGroups + similarGroups)
         await DatabaseService.shared.saveScanRecord(
             summary: summary,
@@ -708,12 +842,20 @@ class ScanViewModel: ObservableObject {
             similarCount: similarGroups.count,
             lowQualityCount: lowQuality.count
         )
+        logStageEnd(
+            "Scan.PhaseB.DeepScan.PersistGroupsAndRecord",
+            startedAt: persistFinalStageStartedAt,
+            status: "dup=\(duplicateGroups.count),sim=\(similarGroups.count),low=\(lowQuality.count)"
+        )
 
+        let pruneStageStartedAt = logStageStart("Scan.PhaseB.DeepScan.PruneStaleDataAsync")
         Task.detached(priority: .background) {
             await DatabaseService.shared.pruneStaleScores(keepIds: Set(ids))
             await DatabaseService.shared.pruneStaleMetadata(keepIds: Set(ids))
         }
+        logStageEnd("Scan.PhaseB.DeepScan.PruneStaleDataAsync", startedAt: pruneStageStartedAt, status: "triggered")
 
+        let finalizeStageStartedAt = logStageStart("Scan.PhaseB.DeepScan.FinalizeUI")
         backgroundProgress = 1.0
         backgroundLabel = L10n.bgComplete
         progress = 1.0
@@ -725,6 +867,7 @@ class ScanViewModel: ObservableObject {
         isBackgroundAnalyzing = false
         phaseLabel = L10n.scanComplete
         startBackgroundFileSizeHydration()
+        logStageEnd("Scan.PhaseB.DeepScan.FinalizeUI", startedAt: finalizeStageStartedAt)
     }
 
     // MARK: - Helpers
@@ -759,12 +902,27 @@ class ScanViewModel: ObservableObject {
             if a.asset.mediaType == .video { s.videoBytes += a.sizeBytes }
             else if a.asset.mediaSubtypes.contains(.photoScreenshot) { s.screenshotBytes += a.sizeBytes }
             else if a.isUtility { s.utilityBytes += a.sizeBytes }
-            else if a.asset.mediaSubtypes.contains(.photoLive) { s.livePhotoBytes += a.sizeBytes }
+            else if a.asset.mediaSubtypes.contains(.photoLive) {
+                s.livePhotoBytes += a.sizeBytes
+                s.livePhotoCount += 1
+            }
             else { s.photoBytes += a.sizeBytes }
-            if a.isSelected { s.freeableBytes += a.sizeBytes }
         }
         let bad = assets.filter { $0.score < 40 }.count
         s.healthScore = max(0, 100 - Int(Double(bad) / Double(max(assets.count, 1)) * 100))
+
+        // Freeable = sum of the six actionable categories shown on the home dashboard.
+        let duplicateFreeable = (duplicateGroups + similarGroups)
+            .flatMap { $0.assets.dropFirst() }
+            .reduce(Int64(0)) { $0 + $1.sizeBytes }
+        let screenshotFreeable  = screenshots.reduce(Int64(0)) { $0 + $1.sizeBytes }
+        let temporaryFreeable   = temporaryRecords.reduce(Int64(0)) { $0 + $1.sizeBytes }
+        let videoFreeable       = videos.reduce(Int64(0)) { $0 + $1.sizeBytes }
+        let lowQualityFreeable  = lowQuality.reduce(Int64(0)) { $0 + $1.sizeBytes }
+        let liveConvertFreeable = Int64(Double(s.livePhotoBytes) * 0.55)
+        s.freeableBytes = duplicateFreeable + screenshotFreeable + temporaryFreeable
+            + videoFreeable + lowQualityFreeable + liveConvertFreeable
+
         summary = s
     }
 
@@ -1129,6 +1287,15 @@ class ScanViewModel: ObservableObject {
     }
 
     private func performIncrementalLaunchSync() async {
+        let incrementalTotalStageStartedAt = logStageStart("Scan.Incremental.Total")
+        defer {
+            logStageEnd(
+                "Scan.Incremental.Total",
+                startedAt: incrementalTotalStageStartedAt,
+                status: Task.isCancelled ? "cancelled" : "completed"
+            )
+        }
+
         guard (phase == .idle || phase == .done), !isBackgroundAnalyzing else { return }
         let startedFromDonePhase = (phase == .done)
         let incrementalStart = Date()
@@ -1141,9 +1308,12 @@ class ScanViewModel: ObservableObject {
             }
         }
 
+        let fetchStageStartedAt = logStageStart("Scan.Incremental.FetchAllAssets")
         let raw = await service.fetchAllAssets()
+        logStageEnd("Scan.Incremental.FetchAllAssets", startedAt: fetchStageStartedAt, status: "assets=\(raw.count)")
         let currentIDs = Set(raw.map(\.id))
 
+        let deltaStageStartedAt = logStageStart("Scan.Incremental.ResolveDelta")
         let activeScannedIDs = await DatabaseService.shared.loadAllActiveScannedIds()
         let deletedIDs = activeScannedIDs.subtracting(currentIDs)
         if !deletedIDs.isEmpty {
@@ -1163,6 +1333,11 @@ class ScanViewModel: ObservableObject {
 
         let scannedExistingIDs = await DatabaseService.shared.loadActiveScannedIds(for: Array(currentIDs))
         let newIDs = currentIDs.subtracting(scannedExistingIDs)
+        logStageEnd(
+            "Scan.Incremental.ResolveDelta",
+            startedAt: deltaStageStartedAt,
+            status: "new=\(newIDs.count),deleted=\(deletedIDs.count)"
+        )
         guard !newIDs.isEmpty else { return }
 
         if startedFromDonePhase {
@@ -1175,6 +1350,7 @@ class ScanViewModel: ObservableObject {
         var newAssets = raw.filter { newIDs.contains($0.id) }
         var resultsByID: [String: PhotoLibraryService.ScoreResult] = [:]
 
+        let scoreStageStartedAt = logStageStart("Scan.Incremental.ScoreNewAssets")
         for i in newAssets.indices {
             if Task.isCancelled { return }
             let result = await service.score(asset: newAssets[i].asset)
@@ -1189,11 +1365,17 @@ class ScanViewModel: ObservableObject {
                 backgroundProgress = 0.05 + (Double(i + 1) / Double(max(newAssets.count, 1))) * 0.55
             }
         }
+        logStageEnd(
+            "Scan.Incremental.ScoreNewAssets",
+            startedAt: scoreStageStartedAt,
+            status: "scored=\(newAssets.count)"
+        )
 
         if startedFromDonePhase {
             backgroundLabel = L10n.bgSaving
             backgroundProgress = 0.75
         }
+        let persistStageStartedAt = logStageStart("Scan.Incremental.PersistAndMark")
         newAssets = await service.populateFileSizes(for: newAssets, limit: newAssets.count)
 
         let scoreEntries: [DatabaseService.ScoreEntry] = newAssets.compactMap { asset in
@@ -1218,6 +1400,11 @@ class ScanViewModel: ObservableObject {
         await DatabaseService.shared.saveFileSizes(sizeEntries)
         await DatabaseService.shared.upsertAssetMetadata(metadataEntries(from: newAssets))
         await DatabaseService.shared.markAssetsScanned(Array(newIDs))
+        logStageEnd(
+            "Scan.Incremental.PersistAndMark",
+            startedAt: persistStageStartedAt,
+            status: "scores=\(scoreEntries.count),sizes=\(sizeEntries.count)"
+        )
 
         let elapsed = max(1, Int(Date().timeIntervalSince(incrementalStart)))
         lastScanDurationSeconds = elapsed
@@ -1226,6 +1413,7 @@ class ScanViewModel: ObservableObject {
         if startedFromDonePhase {
             // Refresh dashboard/category snapshots with newly scored assets while
             // keeping users on the result page (no full-screen scan transition).
+            let refreshStageStartedAt = logStageStart("Scan.Incremental.RefreshSnapshot")
             await loadCachedResultsIfAvailable()
             await DatabaseService.shared.saveScanRecord(
                 summary: summary,
@@ -1233,6 +1421,7 @@ class ScanViewModel: ObservableObject {
                 similarCount: similarGroups.count,
                 lowQualityCount: lowQuality.count
             )
+            logStageEnd("Scan.Incremental.RefreshSnapshot", startedAt: refreshStageStartedAt)
         }
     }
 

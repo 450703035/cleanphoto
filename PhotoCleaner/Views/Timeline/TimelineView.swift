@@ -2,6 +2,7 @@ import SwiftUI
 import Photos
 import CoreLocation
 import AVKit
+import Foundation
 
 // MARK: - Root
 
@@ -40,17 +41,15 @@ struct TimelineView: View {
         }
 
         func includes(_ asset: PhotoAsset) -> Bool {
-            let phAsset = asset.asset
             switch self {
             case .all:
                 return true
             case .photos:
-                return phAsset.mediaType == .image &&
-                    !phAsset.mediaSubtypes.contains(.photoLive)
+                return !asset.isVideo && !asset.isLivePhoto
             case .live:
-                return phAsset.mediaSubtypes.contains(.photoLive)
+                return asset.isLivePhoto
             case .videos:
-                return phAsset.mediaType == .video
+                return asset.isVideo
             }
         }
     }
@@ -88,18 +87,58 @@ struct TimelineView: View {
             }
             .task { await syncTimelineFromScanState() }
             .onReceive(scanVM.$timelineVisibleAssets) { _ in
-                Task { await syncTimelineFromScanState() }
+                Task { await syncTimelineFromScanState(reason: "timelineVisibleAssets_changed") }
             }
             .onReceive(scanVM.$phase) { _ in
-                Task { await syncTimelineFromScanState() }
+                Task { await syncTimelineFromScanState(reason: "scanPhase_changed") }
             }
             .onChange(of: isListNearTail) { _ in
                 guard scanVM.phase == .scanning else { return }
-                Task { await syncTimelineFromScanState() }
+                Task { await syncTimelineFromScanState(reason: "listNearTail_changed") }
             }
-            .onChange(of: mediaFilter) { _ in
+            .onChange(of: viewMode) { newMode in
+                Task {
+                    await syncTimelineFromScanState(
+                        forceApply: true,
+                        reason: "viewMode_changed:\(String(describing: newMode))"
+                    )
+                }
+            }
+            .onChange(of: mediaFilter) { newFilter in
+                let triggerStartedAt = timelinePerfStageStart(
+                    "Timeline.FilterSwitch",
+                    metadata: "filter=\(newFilter.label),mode=\(String(describing: viewMode))"
+                )
                 filterSyncTask?.cancel()
-                filterSyncTask = Task { await syncTimelineFromScanState(forceApply: true) }
+                filterSyncTask = Task {
+                    guard !Task.isCancelled else {
+                        timelinePerfStageEnd(
+                            "Timeline.FilterSwitch",
+                            startedAt: triggerStartedAt,
+                            status: "cancelled_before_sync",
+                            metadata: "filter=\(newFilter.label)"
+                        )
+                        return
+                    }
+                    await syncTimelineFromScanState(
+                        forceApply: true,
+                        reason: "mediaFilter_changed:\(newFilter.label)"
+                    )
+                    guard !Task.isCancelled else {
+                        timelinePerfStageEnd(
+                            "Timeline.FilterSwitch",
+                            startedAt: triggerStartedAt,
+                            status: "cancelled_after_sync",
+                            metadata: "filter=\(newFilter.label)"
+                        )
+                        return
+                    }
+                    timelinePerfStageEnd(
+                        "Timeline.FilterSwitch",
+                        startedAt: triggerStartedAt,
+                        metadata: "filter=\(newFilter.label)"
+                    )
+                }
             }
             .onAppear {
                 vm.setTimelineInteractionActive(true)
@@ -151,7 +190,11 @@ struct TimelineView: View {
                         ProgressView(value: min(max(scanVM.progress, 0), 1))
                             .tint(AppColors.lightPurple)
                             .padding(.horizontal)
-                        Text("时间线整理中 · 已分析 \(scanVM.analyzedCount) 张")
+                        Text(
+                            scanVM.isBackgroundAnalyzing && !scanVM.backgroundLabel.isEmpty
+                            ? "时间线整理中 · \(scanVM.backgroundLabel) · 已分析 \(scanVM.analyzedCount) 张"
+                            : "时间线整理中 · 已分析 \(scanVM.analyzedCount) 张"
+                        )
                             .font(.system(size: 11))
                             .foregroundColor(AppColors.textSecondary)
                     }
@@ -194,36 +237,69 @@ struct TimelineView: View {
         }
     }
 
-    private func syncTimelineFromScanState(forceApply: Bool = false) async {
+    private func syncTimelineFromScanState(forceApply: Bool = false, reason: String = "unspecified") async {
+        let syncStartedAt = timelinePerfStageStart(
+            "Timeline.Sync",
+            metadata: "reason=\(reason),phase=\(String(describing: scanVM.phase)),mode=\(String(describing: viewMode)),filter=\(mediaFilter.label),force=\(forceApply),current=\(vm.allAssets.count)"
+        )
+        var syncStatus = "completed"
+        var syncMetadata = ""
+        defer {
+            timelinePerfStageEnd(
+                "Timeline.Sync",
+                startedAt: syncStartedAt,
+                status: syncStatus,
+                metadata: syncMetadata
+            )
+        }
+
         switch scanVM.phase {
         case .idle:
             vm.clearTimeline()
+            syncMetadata = "action=clear_timeline"
         case .scanning:
             if scanVM.timelineCanShowAssets {
                 let raw = scanVM.timelineVisibleAssets
-                guard !raw.isEmpty else { return }
+                guard !raw.isEmpty else {
+                    syncStatus = "skipped_empty_visible_assets"
+                    return
+                }
                 let filter = mediaFilter
-                let incoming: [PhotoAsset] = await Task.detached(priority: .userInitiated) {
-                    raw.filter { filter.includes($0) }
-                }.value
-                guard !Task.isCancelled else { return }
+                let filterStartedAt = Date()
+                let incoming = await filterAssets(raw, using: filter)
+                let filterDurationMs = Self.msString(Date().timeIntervalSince(filterStartedAt))
+                guard !Task.isCancelled else {
+                    syncStatus = "cancelled_after_filter"
+                    syncMetadata = "raw=\(raw.count),incoming=\(incoming.count),filterCost=\(filterDurationMs)"
+                    return
+                }
 
                 // Filter switch: always re-apply so the timeline reflects the new kind.
                 if forceApply {
-                    await vm.applyScannedSubset(incoming)
+                    let applyStartedAt = Date()
+                    await applyTimelineSubset(incoming)
+                    let applyDurationMs = Self.msString(Date().timeIntervalSince(applyStartedAt))
+                    syncMetadata = "raw=\(raw.count),incoming=\(incoming.count),applied=force,filterCost=\(filterDurationMs),applyCost=\(applyDurationMs)"
                     return
                 }
 
                 // First reveal after the 20s gate.
                 if vm.allAssets.isEmpty && shouldApplySnapshot(incoming) {
-                    await vm.applyScannedSubset(incoming)
+                    let applyStartedAt = Date()
+                    await applyTimelineSubset(incoming)
+                    let applyDurationMs = Self.msString(Date().timeIntervalSince(applyStartedAt))
+                    syncMetadata = "raw=\(raw.count),incoming=\(incoming.count),applied=first_reveal,filterCost=\(filterDurationMs),applyCost=\(applyDurationMs)"
                     return
                 }
 
                 // During scan, only push list updates when user is near the tail and
                 // we actually have new scanned assets; otherwise keep content stable.
                 let hasNewAssets = incoming.count > vm.allAssets.count
-                guard hasNewAssets else { return }
+                guard hasNewAssets else {
+                    syncStatus = "skipped_no_new_assets"
+                    syncMetadata = "raw=\(raw.count),incoming=\(incoming.count),current=\(vm.allAssets.count),filterCost=\(filterDurationMs)"
+                    return
+                }
 
                 let shouldApplyIncrementalUpdate: Bool
                 switch viewMode {
@@ -233,25 +309,103 @@ struct TimelineView: View {
                     shouldApplyIncrementalUpdate = false
                 }
                 if shouldApplyIncrementalUpdate {
-                    await vm.applyScannedSubset(incoming)
+                    let applyStartedAt = Date()
+                    await applyTimelineSubset(incoming)
+                    let applyDurationMs = Self.msString(Date().timeIntervalSince(applyStartedAt))
+                    syncMetadata = "raw=\(raw.count),incoming=\(incoming.count),applied=incremental_list_tail,filterCost=\(filterDurationMs),applyCost=\(applyDurationMs)"
+                } else {
+                    syncStatus = "skipped_policy"
+                    syncMetadata = "raw=\(raw.count),incoming=\(incoming.count),policy_blocked=true,viewMode=\(String(describing: viewMode)),nearTail=\(isListNearTail),filterCost=\(filterDurationMs)"
                 }
             } else {
                 vm.clearTimeline()
+                syncStatus = "cleared_waiting_first_reveal"
+                syncMetadata = "timelineCanShowAssets=false"
             }
         case .done:
             let raw = scanVM.allAssets
             let filter = mediaFilter
-            let incoming: [PhotoAsset] = await Task.detached(priority: .userInitiated) {
-                raw.filter { filter.includes($0) }
-            }.value
-            guard !Task.isCancelled else { return }
-            if forceApply {
-                await vm.applyScannedSubset(incoming)
+            let filterStartedAt = Date()
+            let incoming = await filterAssets(raw, using: filter)
+            let filterDurationMs = Self.msString(Date().timeIntervalSince(filterStartedAt))
+            guard !Task.isCancelled else {
+                syncStatus = "cancelled_after_filter"
+                syncMetadata = "raw=\(raw.count),incoming=\(incoming.count),filterCost=\(filterDurationMs)"
                 return
             }
-            guard shouldApplySnapshot(incoming) else { return }
+            if forceApply {
+                let applyStartedAt = Date()
+                await applyTimelineSubset(incoming)
+                let applyDurationMs = Self.msString(Date().timeIntervalSince(applyStartedAt))
+                syncMetadata = "raw=\(raw.count),incoming=\(incoming.count),applied=force,filterCost=\(filterDurationMs),applyCost=\(applyDurationMs)"
+                return
+            }
+            guard shouldApplySnapshot(incoming) else {
+                syncStatus = "skipped_snapshot_unchanged"
+                syncMetadata = "raw=\(raw.count),incoming=\(incoming.count),filterCost=\(filterDurationMs)"
+                return
+            }
+            let applyStartedAt = Date()
+            await applyTimelineSubset(incoming)
+            let applyDurationMs = Self.msString(Date().timeIntervalSince(applyStartedAt))
+            syncMetadata = "raw=\(raw.count),incoming=\(incoming.count),applied=snapshot_changed,filterCost=\(filterDurationMs),applyCost=\(applyDurationMs)"
+        }
+    }
+
+    private func applyTimelineSubset(_ incoming: [PhotoAsset]) async {
+        switch viewMode {
+        case .waterfall:
+            await vm.applyScannedSubsetAssetsOnly(incoming)
+        case .list, .calendar:
             await vm.applyScannedSubset(incoming)
         }
+    }
+
+    private func filterAssets(_ source: [PhotoAsset], using filter: MediaKindFilter) async -> [PhotoAsset] {
+        var filtered: [PhotoAsset] = []
+        filtered.reserveCapacity(source.count)
+        for (idx, asset) in source.enumerated() {
+            if idx.isMultiple(of: 1024) && Task.isCancelled {
+                return filtered
+            }
+            if filter.includes(asset) {
+                filtered.append(asset)
+            }
+        }
+        return filtered
+    }
+
+    private func timelinePerfStageStart(_ name: String, metadata: String = "") -> Date {
+        let now = Date()
+        let suffix = metadata.isEmpty ? "" : " | \(metadata)"
+        Self.timelinePerfLog("start \(name) @\(Self.timestampString(now))\(suffix)")
+        return now
+    }
+
+    private func timelinePerfStageEnd(
+        _ name: String,
+        startedAt: Date,
+        status: String = "completed",
+        metadata: String = ""
+    ) {
+        let now = Date()
+        let elapsed = Self.msString(now.timeIntervalSince(startedAt))
+        let suffix = metadata.isEmpty ? "" : " | \(metadata)"
+        Self.timelinePerfLog("end \(name) @\(Self.timestampString(now)) | elapsed=\(elapsed) | status=\(status)\(suffix)")
+    }
+
+    private static func timelinePerfLog(_ message: String) {
+        print("[TimelinePerf] \(message)")
+    }
+
+    private static func timestampString(_ date: Date) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter.string(from: date)
+    }
+
+    private static func msString(_ interval: TimeInterval) -> String {
+        String(format: "%.1fms", interval * 1000)
     }
 
     private func shouldApplySnapshot(_ incoming: [PhotoAsset]) -> Bool {
@@ -708,6 +862,14 @@ struct TimelineListView: View {
 struct TimelineWaterfallView: View {
     @ObservedObject var vm: LibraryViewModel
     let scrollScopeID: TimelineView.MediaKindFilter
+    private struct LayoutCacheKey: Hashable {
+        let scope: TimelineView.MediaKindFilter
+        let width: Int
+        let count: Int
+        let firstID: String
+        let middleID: String
+        let lastID: String
+    }
     @State private var assets: [PhotoAsset] = []
     @State private var sectionLayouts: [WaterfallSectionLayout] = []
     @State private var cachedItemWidth: CGFloat = 0
@@ -715,11 +877,14 @@ struct TimelineWaterfallView: View {
     @State private var isScrollInteracting = false
     @State private var scrollIdleTask: Task<Void, Never>? = nil
     @State private var layoutRebuildTask: Task<Void, Never>? = nil
+    @State private var pendingFullLayoutsTask: Task<Void, Never>? = nil
     @State private var viewerRequest: PhotoViewerRequest? = nil
     @State private var deleting = false
     @State private var pendingDeleteAsset: PhotoAsset? = nil
     @State private var showLongPressDeleteAlert = false
     @State private var playingVideoAssetID: String? = nil
+    @State private var layoutRequestSequence = 0
+    @State private var layoutCache: [LayoutCacheKey: [WaterfallSectionLayout]] = [:]
 
     private var selected: [PhotoAsset] { assets.filter { $0.isSelected } }
     private var isAllSelected: Bool { !assets.isEmpty && assets.allSatisfy { $0.isSelected } }
@@ -729,8 +894,10 @@ struct TimelineWaterfallView: View {
             GeometryReader { geo in
                 let colWidth = max(120, (geo.size.width - 34) / 2)
 
+                ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0, pinnedViews: .sectionHeaders) {
+                        Color.clear.frame(height: 0).id("__waterfall_top__")
                         HStack(spacing: 12) {
                             Text(L10n.totalItems(assets.count))
                                 .font(.system(size: 12))
@@ -829,18 +996,21 @@ struct TimelineWaterfallView: View {
                     }
                     .padding(.bottom, selected.isEmpty ? 20 : 90)
                 }
-                .id(scrollScopeID)
                 .onAppear {
                     updateLayoutWidthIfNeeded(colWidth, force: true)
                 }
                 .onChange(of: colWidth) { newWidth in
                     updateLayoutWidthIfNeeded(newWidth, force: true)
                 }
+                .onChange(of: scrollScopeID) { _ in
+                    proxy.scrollTo("__waterfall_top__", anchor: .top)
+                }
                 .simultaneousGesture(
                     DragGesture(minimumDistance: 2)
                         .onChanged { _ in markScrollInteracting() }
                         .onEnded { _ in scheduleScrollIdleFlush() }
                 )
+                }
             }
 
             if !selected.isEmpty {
@@ -858,22 +1028,47 @@ struct TimelineWaterfallView: View {
         }
         .overlay(deleting ? ProgressView(L10n.deleting).padding(24).background(AppColors.cardBG).cornerRadius(14) : nil)
         .onAppear {
+            Self.perfLog(
+                "Waterfall.onAppear @\(Self.timestampString(Date())) | vmAssets=\(vm.allAssets.count),localAssets=\(assets.count)"
+            )
             syncFromViewModel()
             if cachedItemWidth > 0 {
                 rebuildSectionLayouts(itemWidth: cachedItemWidth)
             }
         }
         .onReceive(vm.$allAssets) { latestAssets in
+            Self.perfLog(
+                "Waterfall.onReceiveAssets @\(Self.timestampString(Date())) | count=\(latestAssets.count),interacting=\(isScrollInteracting)"
+            )
             if isScrollInteracting {
                 pendingAssetsSnapshot = latestAssets
+                Self.perfLog(
+                    "Waterfall.onReceiveAssets.buffered @\(Self.timestampString(Date())) | pendingCount=\(latestAssets.count)"
+                )
             } else {
                 syncFromAssets(latestAssets)
             }
         }
+        .onChange(of: scrollScopeID) { newScope in
+            Self.perfLog(
+                "Waterfall.scopeChanged @\(Self.timestampString(Date())) | scope=\(String(describing: newScope)),pending=\(pendingAssetsSnapshot?.count ?? 0),interacting=\(isScrollInteracting)"
+            )
+            // Filter switch is an explicit user action: do not keep old-content buffering.
+            isScrollInteracting = false
+            scrollIdleTask?.cancel()
+            if let pending = pendingAssetsSnapshot {
+                pendingAssetsSnapshot = nil
+                syncFromAssets(pending)
+            }
+        }
         .onDisappear {
+            Self.perfLog(
+                "Waterfall.onDisappear @\(Self.timestampString(Date())) | cancelLayoutTask=\(layoutRebuildTask != nil)"
+            )
             playingVideoAssetID = nil
             scrollIdleTask?.cancel()
             layoutRebuildTask?.cancel()
+            pendingFullLayoutsTask?.cancel()
         }
         .sheet(item: $viewerRequest) { request in
             FullScreenPhotoViewer(assets: $assets, startIndex: request.startIndex)
@@ -895,19 +1090,27 @@ struct TimelineWaterfallView: View {
     }
 
     private func syncFromAssets(_ source: [PhotoAsset]) {
+        let startedAt = Date()
         if let id = playingVideoAssetID, !source.contains(where: { $0.id == id }) {
             playingVideoAssetID = nil
         }
         applySourceAssets(source)
+        Self.perfLog(
+            "Waterfall.syncFromAssets @\(Self.timestampString(Date())) | source=\(source.count),elapsed=\(Self.msString(Date().timeIntervalSince(startedAt)))"
+        )
     }
 
     private func applySourceAssets(_ source: [PhotoAsset]) {
+        let startedAt = Date()
         assets = source.map { asset in
             var a = asset
             // Waterfall mode defaults to unselected unless user explicitly toggled.
             a.isSelected = vm.selectionOverrides[asset.id] ?? false
             return a
         }
+        Self.perfLog(
+            "Waterfall.applySourceAssets @\(Self.timestampString(Date())) | source=\(source.count),mapped=\(assets.count),elapsed=\(Self.msString(Date().timeIntervalSince(startedAt)))"
+        )
         if cachedItemWidth > 0 {
             rebuildSectionLayouts(itemWidth: cachedItemWidth)
         }
@@ -948,22 +1151,118 @@ struct TimelineWaterfallView: View {
         let changed = abs(normalized - cachedItemWidth) > 0.5
         guard force || changed else { return }
         cachedItemWidth = normalized
+        Self.perfLog(
+            "Waterfall.layoutWidthChanged @\(Self.timestampString(Date())) | width=\(Int(normalized)),force=\(force),changed=\(changed)"
+        )
         rebuildSectionLayouts(itemWidth: normalized)
     }
 
     private func rebuildSectionLayouts(itemWidth: CGFloat) {
         guard itemWidth > 0 else { return }
         let snapshot = assets
+        guard !snapshot.isEmpty else {
+            applySectionLayouts([])
+            return
+        }
+        let cacheKey = makeLayoutCacheKey(from: snapshot, itemWidth: itemWidth)
+        if let cacheKey, let cached = layoutCache[cacheKey] {
+            applySectionLayouts(cached)
+            Self.perfLog(
+                "Waterfall.layoutRebuild.cacheHit @\(Self.timestampString(Date())) | sections=\(cached.count),assets=\(snapshot.count),width=\(Int(itemWidth))"
+            )
+            return
+        }
+        Self.perfLog(
+            "Waterfall.layoutRebuild.cacheMiss @\(Self.timestampString(Date())) | assets=\(snapshot.count),width=\(Int(itemWidth))"
+        )
+        if layoutRebuildTask != nil {
+            Self.perfLog(
+                "Waterfall.layoutRebuild.cancelPrevious @\(Self.timestampString(Date()))"
+            )
+        }
         layoutRebuildTask?.cancel()
-        layoutRebuildTask = Task(priority: .utility) {
-            let layouts = await Task.detached(priority: .utility) {
-                Self.buildSectionLayouts(from: snapshot, itemWidth: itemWidth)
-            }.value
-            guard !Task.isCancelled else { return }
+        layoutRequestSequence += 1
+        let requestID = layoutRequestSequence
+        let taskStart = Date()
+        Self.perfLog(
+            "Waterfall.layoutRebuild.start @\(Self.timestampString(taskStart)) | req=\(requestID),assets=\(snapshot.count),width=\(Int(itemWidth))"
+        )
+        layoutRebuildTask = Task(priority: .background) {
+            let buildStartedAt = Date()
+            let layouts = await withTaskGroup(of: [WaterfallSectionLayout].self) { group in
+                group.addTask(priority: .background) {
+                    Self.buildSectionLayouts(from: snapshot, itemWidth: itemWidth)
+                }
+                let computed = await group.next() ?? []
+                group.cancelAll()
+                return computed
+            }
+            guard !Task.isCancelled else {
+                Self.perfLog(
+                    "Waterfall.layoutRebuild.cancelled @\(Self.timestampString(Date())) | req=\(requestID),elapsed=\(Self.msString(Date().timeIntervalSince(taskStart)))"
+                )
+                return
+            }
+            let buildCost = Self.msString(Date().timeIntervalSince(buildStartedAt))
             await MainActor.run {
-                self.sectionLayouts = layouts
+                let applyStartedAt = Date()
+                self.applySectionLayouts(layouts)
+                if let cacheKey {
+                    self.layoutCache[cacheKey] = layouts
+                    if self.layoutCache.count > 12 {
+                        self.layoutCache.remove(at: self.layoutCache.startIndex)
+                    }
+                }
+                let applyCost = Self.msString(Date().timeIntervalSince(applyStartedAt))
+                Self.perfLog(
+                    "Waterfall.layoutRebuild.end @\(Self.timestampString(Date())) | req=\(requestID),sections=\(layouts.count),buildCost=\(buildCost),applyCost=\(applyCost),total=\(Self.msString(Date().timeIntervalSince(taskStart)))"
+                )
             }
         }
+    }
+
+    private func applySectionLayouts(_ layouts: [WaterfallSectionLayout]) {
+        pendingFullLayoutsTask?.cancel()
+        pendingFullLayoutsTask = nil
+        let initialCount = 8
+        guard layouts.count > initialCount else {
+            sectionLayouts = layouts
+            return
+        }
+        sectionLayouts = Array(layouts.prefix(initialCount))
+        Self.perfLog(
+            "Waterfall.layoutApply.firstScreen @\(Self.timestampString(Date())) | preview=\(initialCount),total=\(layouts.count)"
+        )
+        pendingFullLayoutsTask = Task { @MainActor in
+            var current = initialCount
+            var step = 0
+            while current < layouts.count {
+                try? await Task.sleep(nanoseconds: 16_000_000)
+                if Task.isCancelled { return }
+                step += 1
+                let next = min(current * 2, layouts.count)
+                let applyStartedAt = Date()
+                sectionLayouts = Array(layouts.prefix(next))
+                Self.perfLog(
+                    "Waterfall.layoutApply.chunk @\(Self.timestampString(Date())) | step=\(step),from=\(current),to=\(next),total=\(layouts.count),applyCost=\(Self.msString(Date().timeIntervalSince(applyStartedAt)))"
+                )
+                current = next
+            }
+        }
+    }
+
+    private func makeLayoutCacheKey(from snapshot: [PhotoAsset], itemWidth: CGFloat) -> LayoutCacheKey? {
+        guard !snapshot.isEmpty else { return nil }
+        let width = Int(max(1, itemWidth.rounded(.toNearestOrAwayFromZero)))
+        let middleIndex = snapshot.count / 2
+        return LayoutCacheKey(
+            scope: scrollScopeID,
+            width: width,
+            count: snapshot.count,
+            firstID: snapshot.first?.id ?? "",
+            middleID: snapshot[middleIndex].id,
+            lastID: snapshot.last?.id ?? ""
+        )
     }
 
     private func markScrollInteracting() {
@@ -978,13 +1277,20 @@ struct TimelineWaterfallView: View {
 
     private func scheduleScrollIdleFlush() {
         scrollIdleTask?.cancel()
-        scrollIdleTask = Task { @MainActor [pendingAssetsSnapshot] in
+        scrollIdleTask = Task { @MainActor in
             try? await Task.sleep(nanoseconds: 450_000_000)
             guard !Task.isCancelled else { return }
             self.isScrollInteracting = false
-            if let latest = pendingAssetsSnapshot {
+            if let latest = self.pendingAssetsSnapshot {
                 self.pendingAssetsSnapshot = nil
+                Self.perfLog(
+                    "Waterfall.scrollIdleFlush.applyPending @\(Self.timestampString(Date())) | count=\(latest.count)"
+                )
                 self.syncFromAssets(latest)
+            } else {
+                Self.perfLog(
+                    "Waterfall.scrollIdleFlush.noPending @\(Self.timestampString(Date()))"
+                )
             }
         }
     }
@@ -992,51 +1298,63 @@ struct TimelineWaterfallView: View {
     nonisolated private static func buildSectionLayouts(from assets: [PhotoAsset], itemWidth: CGFloat) -> [WaterfallSectionLayout] {
         guard !assets.isEmpty else { return [] }
         let cal = Calendar.current
-        var grouped: [String: (year: Int, month: Int, indices: [Int], totalBytes: Int64)] = [:]
+        struct SectionBuilder {
+            var year: Int
+            var month: Int
+            var totalBytes: Int64
+            var left: [Int]
+            var right: [Int]
+            var leftHeight: CGFloat
+            var rightHeight: CGFloat
+        }
+
+        var builders: [SectionBuilder] = []
+        builders.reserveCapacity(256)
 
         for (idx, asset) in assets.enumerated() {
+            if idx.isMultiple(of: 512) && Task.isCancelled {
+                return []
+            }
             let c = cal.dateComponents([.year, .month], from: asset.creationDate)
             let year = c.year ?? 0
             let month = c.month ?? 0
-            let key = "\(year)-\(month)"
-            if grouped[key] == nil {
-                grouped[key] = (year: year, month: month, indices: [], totalBytes: 0)
+
+            if builders.isEmpty || builders[builders.count - 1].year != year || builders[builders.count - 1].month != month {
+                builders.append(
+                    SectionBuilder(
+                        year: year,
+                        month: month,
+                        totalBytes: 0,
+                        left: [],
+                        right: [],
+                        leftHeight: 0,
+                        rightHeight: 0
+                    )
+                )
             }
-            grouped[key]?.indices.append(idx)
-            grouped[key]?.totalBytes += asset.sizeBytes
+
+            let cardHeight = estimatedCardHeight(for: asset, itemWidth: itemWidth)
+            let sectionIndex = builders.count - 1
+            builders[sectionIndex].totalBytes += asset.sizeBytes
+            if builders[sectionIndex].leftHeight <= builders[sectionIndex].rightHeight {
+                builders[sectionIndex].left.append(idx)
+                builders[sectionIndex].leftHeight += cardHeight
+            } else {
+                builders[sectionIndex].right.append(idx)
+                builders[sectionIndex].rightHeight += cardHeight
+            }
         }
 
-        return grouped.values.map { bucket in
-            let sortedIndices = bucket.indices.sorted { assets[$0].creationDate > assets[$1].creationDate }
-            var left: [Int] = []
-            var right: [Int] = []
-            var leftHeight: CGFloat = 0
-            var rightHeight: CGFloat = 0
-
-            for idx in sortedIndices {
-                let cardHeight = estimatedCardHeight(for: assets[idx], itemWidth: itemWidth)
-                if leftHeight <= rightHeight {
-                    left.append(idx)
-                    leftHeight += cardHeight
-                } else {
-                    right.append(idx)
-                    rightHeight += cardHeight
-                }
-            }
-
-            return WaterfallSectionLayout(
+        return builders.map { bucket in
+            WaterfallSectionLayout(
                 id: "\(bucket.year)-\(bucket.month)",
                 year: bucket.year,
                 month: bucket.month,
                 title: L10n.yearMonth(bucket.year, bucket.month),
                 totalBytes: bucket.totalBytes,
-                left: left,
-                right: right
+                left: bucket.left,
+                right: bucket.right
             )
-        }
-        .sorted { lhs, rhs in
-            if lhs.year != rhs.year { return lhs.year > rhs.year }
-            return lhs.month > rhs.month
         }
     }
 
@@ -1044,6 +1362,20 @@ struct TimelineWaterfallView: View {
         let w = CGFloat(max(1, asset.asset.pixelWidth))
         let h = CGFloat(max(1, asset.asset.pixelHeight))
         return itemWidth * (h / w) + 52
+    }
+
+    nonisolated private static func perfLog(_ message: String) {
+        print("[TimelinePerf] \(message)")
+    }
+
+    nonisolated private static func timestampString(_ date: Date) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter.string(from: date)
+    }
+
+    nonisolated private static func msString(_ interval: TimeInterval) -> String {
+        String(format: "%.1fms", interval * 1000)
     }
 }
 
@@ -1595,7 +1927,7 @@ struct AlbumFolderDetailView: View {
     var body: some View {
         ZStack(alignment: .bottom) {
             if done {
-                DoneView(count: selected.count, label: L10n.photosUnit) { dismiss() }
+                DoneView(count: selected.count, label: "\(selected.count) \(L10n.photosUnit)") { dismiss() }
             } else {
                 VStack(spacing: 0) {
                     SubScreenHeader(
@@ -1681,8 +2013,11 @@ struct AlbumFolderDetailView: View {
                 if !selected.isEmpty && selectionMode {
                     BottomDeleteBar(count: selected.count, sizeLabel: "") {
                         Task {
-                            try? await PhotoStore.shared.deleteAssets(selected)
-                            done = true
+                            do {
+                                try await PhotoStore.shared.deleteAssets(selected)
+                                done = true
+                            } catch {
+                            }
                         }
                     }
                 }
@@ -1919,7 +2254,7 @@ struct DayPhotoDetailView: View {
     var body: some View {
         ZStack(alignment: .bottom) {
             if done {
-                DoneView(count: selected.count, label: L10n.photosUnit) { dismiss() }
+                DoneView(count: selected.count, label: "\(selected.count) \(L10n.photosUnit)") { dismiss() }
             } else {
                 VStack(spacing: 0) {
                     SubScreenHeader(
@@ -2005,8 +2340,11 @@ struct DayPhotoDetailView: View {
                 if !selected.isEmpty && selectionMode {
                     BottomDeleteBar(count: selected.count, sizeLabel: "") {
                         Task {
-                            try? await PhotoStore.shared.deleteAssets(selected)
-                            done = true
+                            do {
+                                try await PhotoStore.shared.deleteAssets(selected)
+                                done = true
+                            } catch {
+                            }
                         }
                     }
                 }

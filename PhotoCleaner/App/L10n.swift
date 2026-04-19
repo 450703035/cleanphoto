@@ -138,6 +138,7 @@ enum L10n {
     }
     static var favoritePhotos: String { isEn ? "Favorites" : "收藏照片" }
     static func favoriteDesc(_ n: Int) -> String { isEn ? "\(n) · Not selected by default" : "\(n)张 · 默认不选择" }
+    static func liveDesc(_ n: Int) -> String { isEn ? "\(n) Live Photos · Convert to save ~55%" : "\(n)个 Live Photo · 转为静态可省约 55%" }
 
     // MARK: Health card
     static var totalPhotos: String { isEn ? "Total Photos" : "照片总数" }
@@ -298,6 +299,14 @@ enum L10n {
     static var loadingLivePhoto: String { isEn ? "Loading Live Photos…" : "正在加载 Live Photo…" }
     static var noLivePhoto: String { isEn ? "No Live Photos in album" : "相册中没有 Live Photo" }
     static var convertSelected: String { isEn ? "Convert Selected" : "转换所选" }
+    static func liveToStaticAction(_ count: Int, _ size: String) -> String {
+        isEn ? "Live to Still \(count) items · Save \(size)" : "live转静态\(count)项，节省\(size)空间"
+    }
+    static var convertingLivePhoto: String { isEn ? "Converting Live Photos…" : "正在转换 Live Photo…" }
+    static var liveConvertFailed: String { isEn ? "Conversion failed. Please try again." : "转换失败，请重试" }
+    static func liveConvertPartial(_ success: Int, _ failed: Int) -> String {
+        isEn ? "Converted \(success), failed \(failed). Please retry failed items." : "已转换\(success)项，失败\(failed)项，请重试失败项"
+    }
     static func approxSave(_ size: String, _ saved: String) -> String { isEn ? "~\(size) · Save ~\(saved)" : "约 \(size) · 节省约 \(saved)" }
 
     // MARK: Blur detect

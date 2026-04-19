@@ -7,6 +7,8 @@ struct PhotoAsset: Identifiable, Hashable {
     let asset: PHAsset
     var score: Int
     var isSelected: Bool
+    var isVideo: Bool = false
+    var isLivePhoto: Bool = false
     var isUtility: Bool = false
     var reason: LowQualityReason?
     var coldTier: ColdTier? = nil
@@ -124,6 +126,7 @@ struct LibrarySummary {
     var screenshotBytes: Int64 = 0
     var utilityBytes: Int64 = 0
     var livePhotoBytes: Int64 = 0
+    var livePhotoCount: Int = 0
     var photoBytes: Int64 = 0
 
     var formattedTotal: String { ByteCountFormatter.string(fromByteCount: totalBytes, countStyle: .file) }

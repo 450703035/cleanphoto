@@ -43,13 +43,15 @@ struct HomeView: View {
             FavoritesCleanView(assets: vm.favorites, vm: vm)
         case .behavior:
             BehaviorCleanView(assets: vm.behaviorAssets, vm: vm)
+        case .liveToStatic:
+            LivePhotoToolView { navPath.removeLast() }
         }
     }
 }
 
 // MARK: - Routes
 enum HomeRoute: Hashable {
-    case duplicates, screenshots, temporaryRecords, videos, lowQuality, favorites, behavior
+    case duplicates, screenshots, temporaryRecords, videos, lowQuality, favorites, behavior, liveToStatic
 }
 
 // MARK: - Idle scan circle
@@ -489,17 +491,23 @@ struct ResultDashboard: View {
                                    size: ByteCountFormatter.string(fromByteCount: vm.lowQuality.reduce(0){$0+$1.sizeBytes}, countStyle: .file)) {
                         navPath.append(.lowQuality)
                     }
-                    SuggestionCard(icon: "snowflake", iconBg: AppColors.amber,
-                                   title: L10n.otherBehavior,
-                                   desc: L10n.behaviorDesc(vm.behaviorAssets.count),
-                                   size: ByteCountFormatter.string(fromByteCount: vm.behaviorAssets.reduce(0){$0+$1.sizeBytes}, countStyle: .file)) {
-                        navPath.append(.behavior)
+                    SuggestionCard(icon: "livephoto", iconBg: AppColors.amber,
+                                   title: L10n.liveToStatic,
+                                   desc: L10n.liveDesc(vm.summary.livePhotoCount),
+                                   size: ByteCountFormatter.string(fromByteCount: Int64(Double(vm.summary.livePhotoBytes) * 0.55), countStyle: .file)) {
+                        navPath.append(.liveToStatic)
                     }
                     SuggestionCard(icon: "heart.fill", iconBg: AppColors.red,
                                    title: L10n.favoritePhotos,
                                    desc: L10n.favoriteDesc(vm.favorites.count),
                                    size: ByteCountFormatter.string(fromByteCount: vm.favorites.reduce(0){$0+$1.sizeBytes}, countStyle: .file)) {
                         navPath.append(.favorites)
+                    }
+                    SuggestionCard(icon: "snowflake", iconBg: AppColors.amber,
+                                   title: L10n.otherBehavior,
+                                   desc: L10n.behaviorDesc(vm.behaviorAssets.count),
+                                   size: ByteCountFormatter.string(fromByteCount: vm.behaviorAssets.reduce(0){$0+$1.sizeBytes}, countStyle: .file)) {
+                        navPath.append(.behavior)
                     }
                 }
                 .padding(.bottom, 20)

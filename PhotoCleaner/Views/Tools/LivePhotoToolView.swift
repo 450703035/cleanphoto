@@ -8,10 +8,16 @@ struct LivePhotoToolView: View {
     @State private var phAssets: [PHAsset] = []
     @State private var selected: Set<String> = []
     @State private var done = false
+    @State private var doneCount = 0
     @State private var isLoading = true
+    @State private var isConverting = false
+    @State private var statusMessage = ""
+    @State private var didInitializeThisAppearance = false
     private let service = PhotoLibraryService.shared
 
     private var selectedAssets: [PHAsset] { phAssets.filter { selected.contains($0.localIdentifier) } }
+    private var allAssetIDs: Set<String> { Set(phAssets.map(\.localIdentifier)) }
+    private var isAllSelected: Bool { !allAssetIDs.isEmpty && selected == allAssetIDs }
     private var totalSavedBytes: Int64 {
         selectedAssets.reduce(0) { $0 + livePhotoSavings($1) }
     }
@@ -20,17 +26,37 @@ struct LivePhotoToolView: View {
         ZStack(alignment: .bottom) {
             AppColors.darkBG.ignoresSafeArea()
             if done {
-                DoneView(count: selected.count, label: L10n.livePhotoDone(selected.count), onBack: onDismiss)
+                DoneView(count: doneCount, label: L10n.livePhotoDone(doneCount), onBack: onDismiss)
             } else {
                 VStack(spacing: 0) {
                     SubScreenHeader(
                         title: L10n.liveToStatic,
                         subtitle: isLoading ? L10n.loading : L10n.livePhotoSubtitle(phAssets.count, ByteCountFormatter.string(fromByteCount: totalSavedBytes, countStyle: .file)),
-                        onBack: onDismiss
+                        onBack: onDismiss,
+                        trailing: AnyView(
+                            Button(isAllSelected ? L10n.deselectAll : L10n.selectAll) {
+                                if isAllSelected {
+                                    selected.removeAll()
+                                } else {
+                                    selected = allAssetIDs
+                                }
+                            }
+                                .disabled(isLoading || isConverting || phAssets.isEmpty)
+                                .foregroundColor(AppColors.lightPurple)
+                                .font(AppTypography.body)
+                        )
                     )
                     Text(L10n.livePhotoNote)
                         .font(AppTypography.caption).foregroundColor(AppColors.textSecondary)
                         .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal).padding(.top, 8)
+                    if !statusMessage.isEmpty {
+                        Text(statusMessage)
+                            .font(AppTypography.caption)
+                            .foregroundColor(AppColors.red)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal)
+                            .padding(.top, 4)
+                    }
 
                     if isLoading {
                         ToolLoadingView(message: L10n.loadingLivePhoto)
@@ -45,29 +71,92 @@ struct LivePhotoToolView: View {
                     BottomDeleteBar(
                         count: selected.count,
                         sizeLabel: ByteCountFormatter.string(fromByteCount: totalSavedBytes, countStyle: .file),
-                        actionLabel: L10n.convertSelected,
+                        fullActionText: L10n.liveToStaticAction(
+                            selected.count,
+                            ByteCountFormatter.string(fromByteCount: totalSavedBytes, countStyle: .file)
+                        ),
+                        iconName: "livephoto",
                         color: AppColors.purple
                     ) {
-                        Task {
-                            for asset in selectedAssets { try? await service.convertLivePhotoToStatic(asset) }
-                            done = true
+                        Task { @MainActor in
+                            if isConverting { return }
+                            let targets = selectedAssets
+                            guard !targets.isEmpty else { return }
+                            let targetIDs = Set(targets.map(\.localIdentifier))
+                            isConverting = true
+                            statusMessage = ""
+
+                            var requestSuccessCount = 0
+                            for asset in targets {
+                                do {
+                                    try await service.convertLivePhotoToStatic(asset)
+                                    requestSuccessCount += 1
+                                } catch {
+                                    continue
+                                }
+                            }
+
+                            await loadAssets(resetSelection: false)
+                            var remainingLiveIDs = Set(phAssets.map(\.localIdentifier))
+                            var actualConvertedCount = targetIDs.subtracting(remainingLiveIDs).count
+
+                            // Photo library updates can be briefly delayed; retry once before finalizing.
+                            if actualConvertedCount < requestSuccessCount {
+                                try? await Task.sleep(nanoseconds: 350_000_000)
+                                await loadAssets(resetSelection: false)
+                                remainingLiveIDs = Set(phAssets.map(\.localIdentifier))
+                                actualConvertedCount = targetIDs.subtracting(remainingLiveIDs).count
+                            }
+
+                            let actualFailedCount = max(0, targets.count - actualConvertedCount)
+                            isConverting = false
+                            doneCount = actualConvertedCount
+                            if actualFailedCount == 0, actualConvertedCount > 0 {
+                                done = true
+                            } else if actualConvertedCount > 0 {
+                                statusMessage = L10n.liveConvertPartial(actualConvertedCount, actualFailedCount)
+                            } else {
+                                statusMessage = L10n.liveConvertFailed
+                            }
                         }
                     }
                 }
             }
         }
-        .task { await loadAssets() }
+        .overlay(isConverting ? ProgressView(L10n.convertingLivePhoto).padding(24).background(AppColors.cardBG).cornerRadius(8) : nil)
+        .navigationBarHidden(true)
+        .onAppear {
+            guard !didInitializeThisAppearance else { return }
+            didInitializeThisAppearance = true
+            done = false
+            doneCount = 0
+            statusMessage = ""
+            selected.removeAll()
+            isLoading = true
+            Task { await loadAssets(resetSelection: true) }
+        }
+        .onDisappear {
+            didInitializeThisAppearance = false
+        }
     }
 
-    private func loadAssets() async {
+    @MainActor
+    private func loadAssets(resetSelection: Bool) async {
         let opts = PHFetchOptions()
         opts.predicate = NSPredicate(format: "mediaSubtype & %d != 0", PHAssetMediaSubtype.photoLive.rawValue)
         opts.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
         let result = PHAsset.fetchAssets(with: .image, options: opts)
         var arr: [PHAsset] = []
         result.enumerateObjects { asset, _, _ in arr.append(asset) }
+        let newIDs = Set(arr.map(\.localIdentifier))
+        let oldSelection = selected
         phAssets = arr
-        selected = Set(arr.map { $0.localIdentifier })
+        if resetSelection {
+            selected = []
+        } else {
+            // Keep existing user selection across refreshes; converted items disappear automatically.
+            selected = oldSelection.intersection(newIDs)
+        }
         isLoading = false
     }
 }

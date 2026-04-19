@@ -82,9 +82,13 @@ struct DuplicatesView: View {
                     ) {
                         Task {
                             deleting = true
-                            try? await vm.deleteGroups(groups)
-                            deleting = false
-                            done = true
+                            do {
+                                try await vm.deleteGroups(groups)
+                                deleting = false
+                                done = true
+                            } catch {
+                                deleting = false
+                            }
                         }
                     }
                 }
@@ -115,11 +119,17 @@ struct DuplicatesView: View {
         guard !mergingGroupIDs.contains(group.id), group.assets.count > 1 else { return }
         mergingGroupIDs.insert(group.id)
         Task {
-            try? await vm.deleteGroups([group])
-            await MainActor.run {
-                groups.removeAll { $0.id == group.id }
-                mergingGroupIDs.remove(group.id)
-                if groups.isEmpty { done = true }
+            do {
+                try await vm.deleteGroups([group])
+                await MainActor.run {
+                    groups.removeAll { $0.id == group.id }
+                    mergingGroupIDs.remove(group.id)
+                    if groups.isEmpty { done = true }
+                }
+            } catch {
+                await MainActor.run {
+                    mergingGroupIDs.remove(group.id)
+                }
             }
         }
     }
@@ -491,9 +501,13 @@ struct ScreenshotCleanView: View {
                             for i in scopedSelection.indices {
                                 scopedSelection[i].isSelected = targetIds.contains(scopedSelection[i].id)
                             }
-                            try? await vm.deleteSelected(from: scopedSelection)
-                            deleting = false
-                            done = true
+                            do {
+                                try await vm.deleteSelected(from: scopedSelection)
+                                deleting = false
+                                done = true
+                            } catch {
+                                deleting = false
+                            }
                         }
                     }
                 }
@@ -698,9 +712,13 @@ struct TemporaryRecordCleanView: View {
                         Task {
                             deleting = true
                             doneCount = selected.count
-                            try? await vm.deleteSelected(from: assets)
-                            deleting = false
-                            done = true
+                            do {
+                                try await vm.deleteSelected(from: assets)
+                                deleting = false
+                                done = true
+                            } catch {
+                                deleting = false
+                            }
                         }
                     }
                 }
@@ -903,9 +921,13 @@ struct VideoCleanView: View {
                     ) {
                         Task {
                             deleting = true
-                            try? await vm.deleteSelected(from: assets)
-                            deleting = false
-                            done = true
+                            do {
+                                try await vm.deleteSelected(from: assets)
+                                deleting = false
+                                done = true
+                            } catch {
+                                deleting = false
+                            }
                         }
                     }
                 }
@@ -1234,9 +1256,13 @@ struct LowQualityCleanView: View {
                             for i in scopedSelection.indices {
                                 scopedSelection[i].isSelected = targetIds.contains(scopedSelection[i].id)
                             }
-                            try? await vm.deleteSelected(from: scopedSelection)
-                            deleting = false
-                            done = true
+                            do {
+                                try await vm.deleteSelected(from: scopedSelection)
+                                deleting = false
+                                done = true
+                            } catch {
+                                deleting = false
+                            }
                         }
                     }
                 }
@@ -1388,9 +1414,13 @@ struct FavoritesCleanView: View {
                     ) {
                         Task {
                             deleting = true
-                            try? await vm.deleteSelected(from: assets)
-                            deleting = false
-                            done = true
+                            do {
+                                try await vm.deleteSelected(from: assets)
+                                deleting = false
+                                done = true
+                            } catch {
+                                deleting = false
+                            }
                         }
                     }
                 }
@@ -1582,9 +1612,13 @@ struct BehaviorCleanView: View {
                             for i in scopedSelection.indices {
                                 scopedSelection[i].isSelected = targetIds.contains(scopedSelection[i].id)
                             }
-                            try? await vm.deleteSelected(from: scopedSelection)
-                            deleting = false
-                            done = true
+                            do {
+                                try await vm.deleteSelected(from: scopedSelection)
+                                deleting = false
+                                done = true
+                            } catch {
+                                deleting = false
+                            }
                         }
                     }
                 }

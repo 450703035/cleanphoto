@@ -68,6 +68,8 @@ struct PhotoThumbnail: View {
     var contentMode: ContentMode = .fill
     @State private var image: UIImage?
     @State private var requestID: PHImageRequestID?
+    @State private var representedAssetID: String = ""
+    @State private var loadGeneration: Int = 0
 
     var body: some View {
         let h = height ?? size
@@ -84,22 +86,29 @@ struct PhotoThumbnail: View {
         .frame(width: size, height: h)
         .clipped()
         .task(id: asset.localIdentifier) {
-            await load()
+            representedAssetID = asset.localIdentifier
+            await load(for: asset.localIdentifier)
         }
         .onDisappear {
             if let rid = requestID {
                 ThumbnailCacheManager.shared.cancelRequest(rid)
                 requestID = nil
             }
+            loadGeneration &+= 1
         }
     }
 
-    private func load() async {
+    private func load(for assetID: String) async {
+        loadGeneration &+= 1
+        let generation = loadGeneration
         // Cancel any previous request for this view
         if let rid = requestID {
             ThumbnailCacheManager.shared.cancelRequest(rid)
             requestID = nil
         }
+        // Prevent showing stale thumbnail from the previous asset while new image is loading.
+        image = nil
+
         let h = height ?? size
         let scale = UIScreen.main.scale
         let targetSize = CGSize(width: size * scale, height: h * scale)
@@ -111,6 +120,8 @@ struct PhotoThumbnail: View {
             networkAccessAllowed: false
         ) { img in
             Task { @MainActor in
+                guard self.representedAssetID == assetID else { return }
+                guard self.loadGeneration == generation else { return }
                 if let img { image = img }
             }
         }
@@ -223,6 +234,8 @@ struct BottomDeleteBar: View {
     let count: Int
     let sizeLabel: String
     var actionLabel: String = L10n.deleteSelected
+    var fullActionText: String? = nil
+    var iconName: String = "trash"
     var color: Color = AppColors.red
     let onDelete: () -> Void
 
@@ -231,8 +244,8 @@ struct BottomDeleteBar: View {
             Divider().background(AppColors.separator)
             Button(action: onDelete) {
                 HStack {
-                    Image(systemName: "trash")
-                    Text(L10n.actionCount(actionLabel, count, size: sizeLabel))
+                    Image(systemName: iconName)
+                    Text(fullActionText ?? L10n.actionCount(actionLabel, count, size: sizeLabel))
                         .fontWeight(.bold)
                 }
                 .frame(maxWidth: .infinity)
@@ -268,8 +281,10 @@ struct SubScreenHeader: View {
                     }
                     .foregroundColor(AppColors.lightPurple)
                 }
+                .modifier(LiquidGlassChip())
                 Spacer()
                 trailing
+                    .modifier(LiquidGlassChip())
             }
             .padding(.horizontal)
             .padding(.top, 8)
@@ -295,6 +310,27 @@ struct SubScreenHeader: View {
     }
 }
 
+// MARK: - Liquid glass chip
+/// Wraps a control (back button, trailing action) in a Liquid Glass capsule.
+/// Uses `.glassEffect` on iOS 26+, falls back to `.ultraThinMaterial` for iOS 16–25.
+/// Empty content stays invisible — the capsule sizes to its content.
+struct LiquidGlassChip: ViewModifier {
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        let padded = content
+            .padding(.vertical, 6)
+            .padding(.horizontal, 12)
+
+        if #available(iOS 26.0, *) {
+            padded.glassEffect(.regular.interactive(), in: Capsule())
+        } else {
+            padded
+                .background(.ultraThinMaterial, in: Capsule())
+                .overlay(Capsule().strokeBorder(Color.white.opacity(0.12), lineWidth: 0.5))
+        }
+    }
+}
+
 // MARK: - Done screen
 struct DoneView: View {
     let count: Int
@@ -305,7 +341,7 @@ struct DoneView: View {
         VStack(spacing: 16) {
             Text("🎉").font(.system(size: 64))
             Text(L10n.cleanComplete).font(.title2).bold().foregroundColor(AppColors.textPrimary)
-            Text("\(count) \(label)")
+            Text(label)
                 .font(.largeTitle).bold()
                 .foregroundColor(AppColors.lightPurple)
             Text(L10n.movedToTrash)

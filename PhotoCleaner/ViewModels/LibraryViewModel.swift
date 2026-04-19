@@ -1,6 +1,7 @@
 import SwiftUI
 import Photos
 import Combine
+import Foundation
 
 @MainActor
 class LibraryViewModel: ObservableObject {
@@ -120,19 +121,46 @@ class LibraryViewModel: ObservableObject {
     /// Accepts externally-scanned assets (from ScanViewModel) and rebuilds timeline sections.
     /// Used by Timeline tab to show only the scanned subset during long-running scans.
     func applyScannedSubset(_ assets: [PhotoAsset]) async {
+        let totalStartedAt = timelinePerfStageStart("Library.applyScannedSubset", metadata: "assets=\(assets.count)")
         allAssets = assets
         guard !assets.isEmpty else {
             yearGroups = [:]
             dayMap = [:]
             rebuildSizeCaches()
+            timelinePerfStageEnd(
+                "Library.applyScannedSubset",
+                startedAt: totalStartedAt,
+                status: "cleared_empty_snapshot"
+            )
             return
         }
+        let groupBuildStartedAt = Date()
         let (groups, map) = await Task.detached(priority: .userInitiated) {
             (LibraryViewModel.computeYearGroups(assets), LibraryViewModel.computeDayMap(assets))
         }.value
+        let groupBuildElapsed = Self.msString(Date().timeIntervalSince(groupBuildStartedAt))
         yearGroups = groups
         dayMap = map
         rebuildSizeCaches()
+        timelinePerfStageEnd(
+            "Library.applyScannedSubset",
+            startedAt: totalStartedAt,
+            metadata: "assets=\(assets.count),years=\(groups.count),dayMap=\(map.count),groupBuild=\(groupBuildElapsed)"
+        )
+    }
+
+    /// Fast path for waterfall filter switching:
+    /// only publish `allAssets` so waterfall can refresh quickly.
+    /// Year/month/day indexes are intentionally preserved and will be rebuilt when needed
+    /// (e.g. switching to list/calendar triggers full sync).
+    func applyScannedSubsetAssetsOnly(_ assets: [PhotoAsset]) async {
+        let totalStartedAt = timelinePerfStageStart("Library.applyScannedSubsetAssetsOnly", metadata: "assets=\(assets.count)")
+        allAssets = assets
+        timelinePerfStageEnd(
+            "Library.applyScannedSubsetAssetsOnly",
+            startedAt: totalStartedAt,
+            metadata: "assets=\(assets.count)"
+        )
     }
 
     func clearTimeline() {
@@ -250,12 +278,14 @@ class LibraryViewModel: ObservableObject {
             await DatabaseService.shared.pruneStaleMetadata(keepIds: Set(idsSnapshot))
             guard !Task.isCancelled else { return }
 
-            self.store.setAssets(scored.assets)
-            self.allAssets = scored.assets
-            self.yearGroups = finalGroups
-            self.dayMap = finalDayMap
-            self.rebuildSizeCaches()
-            self.scoringProgress = 1.0
+            await MainActor.run {
+                self.store.setAssets(scored.assets)
+                self.allAssets = scored.assets
+                self.yearGroups = finalGroups
+                self.dayMap = finalDayMap
+                self.rebuildSizeCaches()
+                self.scoringProgress = 1.0
+            }
         }
     }
 
@@ -434,6 +464,39 @@ class LibraryViewModel: ObservableObject {
         guard AppConfig.autoSelect else { return false }            // user disabled auto-select
         if AppConfig.protectFaces && hasFaces { return false }      // face-protection shield
         return score < AppConfig.deleteThreshold                    // normal threshold check
+    }
+
+    private func timelinePerfStageStart(_ name: String, metadata: String = "") -> Date {
+        let now = Date()
+        let suffix = metadata.isEmpty ? "" : " | \(metadata)"
+        Self.timelinePerfLog("start \(name) @\(Self.timestampString(now))\(suffix)")
+        return now
+    }
+
+    private func timelinePerfStageEnd(
+        _ name: String,
+        startedAt: Date,
+        status: String = "completed",
+        metadata: String = ""
+    ) {
+        let now = Date()
+        let elapsed = Self.msString(now.timeIntervalSince(startedAt))
+        let suffix = metadata.isEmpty ? "" : " | \(metadata)"
+        Self.timelinePerfLog("end \(name) @\(Self.timestampString(now)) | elapsed=\(elapsed) | status=\(status)\(suffix)")
+    }
+
+    private nonisolated static func timelinePerfLog(_ message: String) {
+        print("[TimelinePerf] \(message)")
+    }
+
+    private nonisolated static func timestampString(_ date: Date) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter.string(from: date)
+    }
+
+    private nonisolated static func msString(_ interval: TimeInterval) -> String {
+        String(format: "%.1fms", interval * 1000)
     }
 
     private func rebuildSizeCaches() {

@@ -10,6 +10,7 @@ class PhotoLibraryService: ObservableObject {
     static let shared = PhotoLibraryService()
     private init() {}
     private let imageRequestTimeout: TimeInterval = 12
+    private let scoreComputeTimeout: TimeInterval = 10
     private let decodeFailureTTL: TimeInterval = 180
     private let decodeFailureLock = NSLock()
     private var decodeFailedAssetIds: [String: Date] = [:]
@@ -32,11 +33,15 @@ class PhotoLibraryService: ObservableObject {
             result.enumerateObjects { asset, _, _ in
                 // Do not sync-fetch PHAssetResource.fileSize during app launch.
                 // That triggers on-demand metadata fetches and can stall UI.
+                let isVideo = asset.mediaType == .video
+                let isLivePhoto = asset.mediaSubtypes.contains(.photoLive)
                 let pa = PhotoAsset(
                     id: asset.localIdentifier,
                     asset: asset,
                     score: 50,
                     isSelected: false,
+                    isVideo: isVideo,
+                    isLivePhoto: isLivePhoto,
                     fileSizeBytes: nil
                 )
                 assets.append(pa)
@@ -124,18 +129,9 @@ class PhotoLibraryService: ObservableObject {
             contentMode: .aspectFit,
             timeout: imageRequestTimeout
         ), let cgImage = image.cgImage else {
-            return ScoreResult(
-                score: 50,
-                isBlurry: false,
-                isOverExposed: false,
-                isUnderExposed: false,
-                hasFaces: false,
-                isUtility: false,
-                isShaky: false,
-                isFocusFailed: false
-            )
+            return Self.neutralScoreResult
         }
-        return Self.computeScore(cgImage: cgImage, asset: asset)
+        return await computeScoreWithTimeout(cgImage: cgImage, asset: asset)
     }
 
     struct ScoreResult: Sendable {
@@ -155,6 +151,45 @@ class PhotoLibraryService: ObservableObject {
         let isFocusFailed: Bool
         let isOverExposed: Bool
         let isUnderExposed: Bool
+    }
+
+    private static let neutralScoreResult = ScoreResult(
+        score: 50,
+        isBlurry: false,
+        isOverExposed: false,
+        isUnderExposed: false,
+        hasFaces: false,
+        isUtility: false,
+        isShaky: false,
+        isFocusFailed: false
+    )
+
+    private func computeScoreWithTimeout(cgImage: CGImage, asset: PHAsset) async -> ScoreResult {
+        await withCheckedContinuation { (cont: CheckedContinuation<ScoreResult, Never>) in
+            let lock = NSLock()
+            var finished = false
+
+            func finish(_ result: ScoreResult) {
+                lock.lock()
+                guard !finished else {
+                    lock.unlock()
+                    return
+                }
+                finished = true
+                lock.unlock()
+                cont.resume(returning: result)
+            }
+
+            DispatchQueue.global(qos: .utility).async {
+                let result = Self.computeScore(cgImage: cgImage, asset: asset)
+                finish(result)
+            }
+
+            let deadline = DispatchTime.now() + max(scoreComputeTimeout, 1)
+            DispatchQueue.global(qos: .utility).asyncAfter(deadline: deadline) {
+                finish(Self.neutralScoreResult)
+            }
+        }
     }
 
     // Shared CIContext — GPU-accelerated, thread-safe for rendering.
@@ -504,7 +539,10 @@ class PhotoLibraryService: ObservableObject {
     }
 
     // MARK: - Detect duplicates using feature print (with hash fallback)
-    func findDuplicates(assets: [PhotoAsset]) async -> [PhotoGroup] {
+    func findDuplicates(
+        assets: [PhotoAsset],
+        onProgress: ((Double) -> Void)? = nil
+    ) async -> [PhotoGroup] {
         struct Candidate {
             let asset: PhotoAsset
             let feature: VNFeaturePrintObservation?
@@ -516,6 +554,14 @@ class PhotoLibraryService: ObservableObject {
             $0.asset.mediaType == .image
         }
         guard images.count > 1 else { return [] }
+        func report(_ value: Double) {
+            guard let onProgress else { return }
+            let clamped = max(0, min(1, value))
+            Task { @MainActor in
+                onProgress(clamped)
+            }
+        }
+        report(0)
 
         var result: [PhotoGroup] = []
         var used = Set<String>()
@@ -546,8 +592,17 @@ class PhotoLibraryService: ObservableObject {
             buckets[key, default: []].append(photo)
         }
 
-        for bucket in buckets.values where bucket.count > 1 {
+        let candidateBuckets = buckets.values.filter { $0.count > 1 }
+        if candidateBuckets.isEmpty {
+            report(1)
+            return result
+        }
+
+        var processedBuckets = 0
+        for bucket in candidateBuckets {
             var candidates: [Candidate] = []
+            let localTotal = max(bucket.count, 1)
+            var localProcessed = 0
             for photo in bucket {
                 guard !used.contains(photo.id) else { continue }
                 let feature = await featurePrint(for: photo.asset)
@@ -555,12 +610,24 @@ class PhotoLibraryService: ObservableObject {
                 if feature == nil && hash == nil { continue }
                 let fileSize = assetFileSize(photo.asset) ?? photo.sizeBytes
                 candidates.append(Candidate(asset: photo, feature: feature, hash: hash, fileSize: fileSize))
+
+                localProcessed += 1
+                if localProcessed == 1 || localProcessed % 24 == 0 || localProcessed == localTotal {
+                    let bucketProgress = Double(localProcessed) / Double(localTotal)
+                    let globalProgress = (Double(processedBuckets) + bucketProgress * 0.8)
+                        / Double(candidateBuckets.count)
+                    report(globalProgress)
+                }
             }
             guard candidates.count > 1 else { continue }
 
             for i in candidates.indices {
                 let base = candidates[i]
                 guard !used.contains(base.asset.id) else { continue }
+
+                if i % 24 == 0 {
+                    await Task.yield()
+                }
 
                 var cluster: [PhotoAsset] = [base.asset]
                 used.insert(base.asset.id)
@@ -593,13 +660,27 @@ class PhotoLibraryService: ObservableObject {
                     for idx in 1..<sorted.count { sorted[idx].isSelected = true }
                     result.append(PhotoGroup(assets: sorted, groupType: .duplicate))
                 }
+
+                if i == 0 || i % 24 == 0 || i == candidates.count - 1 {
+                    let clusterProgress = Double(i + 1) / Double(max(candidates.count, 1))
+                    let globalProgress = (Double(processedBuckets) + 0.8 + clusterProgress * 0.2)
+                        / Double(candidateBuckets.count)
+                    report(globalProgress)
+                }
             }
+
+            processedBuckets += 1
+            report(Double(processedBuckets) / Double(candidateBuckets.count))
         }
+        report(1)
         return result
     }
 
     // MARK: - Detect similar using feature print
-    func findSimilar(assets: [PhotoAsset]) async -> [PhotoGroup] {
+    func findSimilar(
+        assets: [PhotoAsset],
+        onProgress: ((Double) -> Void)? = nil
+    ) async -> [PhotoGroup] {
         struct SimilarPhoto {
             let photo: PhotoAsset
             let feature: VNFeaturePrintObservation?
@@ -610,6 +691,14 @@ class PhotoLibraryService: ObservableObject {
             $0.asset.mediaType == .image
         }
         guard images.count > 1 else { return [] }
+        func report(_ value: Double) {
+            guard let onProgress else { return }
+            let clamped = max(0, min(1, value))
+            Task { @MainActor in
+                onProgress(clamped)
+            }
+        }
+        report(0)
 
         let sortedImages = images.sorted(by: { $0.creationDate < $1.creationDate })
         // Only assets with near-by neighbors can be "similar bursts".
@@ -636,10 +725,14 @@ class PhotoLibraryService: ObservableObject {
 
         var candidates: [SimilarPhoto] = []
         candidates.reserveCapacity(similarBurstCandidates.count)
-        for photo in similarBurstCandidates {
+        for (idx, photo) in similarBurstCandidates.enumerated() {
             let feature = await featurePrint(for: photo.asset)
             let hash = await perceptualHash(for: photo.asset)
             candidates.append(SimilarPhoto(photo: photo, feature: feature, hash: hash))
+            if idx == 0 || idx % 24 == 0 || idx == similarBurstCandidates.count - 1 {
+                let p = Double(idx + 1) / Double(max(similarBurstCandidates.count, 1))
+                report(p * 0.85)
+            }
         }
         guard candidates.count > 1 else { return [] }
 
@@ -648,6 +741,9 @@ class PhotoLibraryService: ObservableObject {
         var last = candidates[0]
 
         for idx in 1..<candidates.count {
+            if idx % 24 == 0 {
+                await Task.yield()
+            }
             let item = candidates[idx]
             let dt = item.photo.creationDate.timeIntervalSince(last.photo.creationDate)
             let byFeature: Bool = {
@@ -674,6 +770,11 @@ class PhotoLibraryService: ObservableObject {
                 current = [item.photo]
             }
             last = item
+
+            if idx == 1 || idx % 24 == 0 || idx == candidates.count - 1 {
+                let p = Double(idx) / Double(max(candidates.count - 1, 1))
+                report(0.85 + p * 0.15)
+            }
         }
 
         if current.count > 1 {
@@ -682,6 +783,7 @@ class PhotoLibraryService: ObservableObject {
             result.append(PhotoGroup(assets: sorted, groupType: .similar))
         }
 
+        report(1)
         return result
     }
 
@@ -771,12 +873,132 @@ class PhotoLibraryService: ObservableObject {
 
     // MARK: - Convert Live Photo to static
     func convertLivePhotoToStatic(_ asset: PHAsset) async throws {
-        // Export the still image component
-        let opts = PHLivePhotoRequestOptions()
-        opts.deliveryMode = .highQualityFormat
-        // In production: use PHAssetChangeRequest to strip Live component
-        // Simulated here for demo
-        try await Task.sleep(nanoseconds: 500_000_000)
+        guard asset.mediaType == .image else {
+            throw NSError(
+                domain: "PhotoCleaner.LiveConvert",
+                code: 1001,
+                userInfo: [NSLocalizedDescriptionKey: "Asset is not an image."]
+            )
+        }
+        guard asset.mediaSubtypes.contains(.photoLive) else {
+            throw NSError(
+                domain: "PhotoCleaner.LiveConvert",
+                code: 1002,
+                userInfo: [NSLocalizedDescriptionKey: "Asset is not a Live Photo."]
+            )
+        }
+
+        let stillPayload = try await livePhotoStillPayload(for: asset)
+        try await PHPhotoLibrary.shared().performChanges {
+            let creationRequest = PHAssetCreationRequest.forAsset()
+            let options = PHAssetResourceCreationOptions()
+            options.originalFilename = stillPayload.filename
+            if let uti = stillPayload.uniformTypeIdentifier, !uti.isEmpty {
+                options.uniformTypeIdentifier = uti
+            }
+            creationRequest.addResource(with: .photo, data: stillPayload.data, options: options)
+            creationRequest.creationDate = asset.creationDate
+            creationRequest.location = asset.location
+            creationRequest.isFavorite = asset.isFavorite
+
+            PHAssetChangeRequest.deleteAssets([asset] as NSArray)
+        }
+    }
+
+    private struct LivePhotoStillPayload {
+        let data: Data
+        let filename: String?
+        let uniformTypeIdentifier: String?
+    }
+
+    private func livePhotoStillPayload(for asset: PHAsset) async throws -> LivePhotoStillPayload {
+        let resources = PHAssetResource.assetResources(for: asset)
+        if let stillResource = preferredLiveStillResource(from: resources) {
+            let data = try await requestData(for: stillResource)
+            return LivePhotoStillPayload(
+                data: data,
+                filename: stillResource.originalFilename,
+                uniformTypeIdentifier: stillResource.uniformTypeIdentifier
+            )
+        }
+
+        let data = try await requestImageData(for: asset)
+        return LivePhotoStillPayload(data: data, filename: nil, uniformTypeIdentifier: nil)
+    }
+
+    private func preferredLiveStillResource(from resources: [PHAssetResource]) -> PHAssetResource? {
+        for type in [PHAssetResourceType.fullSizePhoto, .photo, .alternatePhoto] {
+            if let matched = resources.first(where: { $0.type == type }) {
+                return matched
+            }
+        }
+        return nil
+    }
+
+    private func requestData(for resource: PHAssetResource) async throws -> Data {
+        try await withCheckedThrowingContinuation { cont in
+            let options = PHAssetResourceRequestOptions()
+            options.isNetworkAccessAllowed = true
+
+            var collected = Data()
+            PHAssetResourceManager.default().requestData(
+                for: resource,
+                options: options,
+                dataReceivedHandler: { chunk in
+                    collected.append(chunk)
+                },
+                completionHandler: { error in
+                    if let error {
+                        cont.resume(throwing: error)
+                        return
+                    }
+                    if collected.isEmpty {
+                        cont.resume(throwing: NSError(
+                            domain: "PhotoCleaner.LiveConvert",
+                            code: 1003,
+                            userInfo: [NSLocalizedDescriptionKey: "Still resource is empty."]
+                        ))
+                        return
+                    }
+                    cont.resume(returning: collected)
+                }
+            )
+        }
+    }
+
+    private func requestImageData(for asset: PHAsset) async throws -> Data {
+        try await withCheckedThrowingContinuation { cont in
+            let options = PHImageRequestOptions()
+            options.version = .current
+            options.deliveryMode = .highQualityFormat
+            options.resizeMode = .none
+            options.isSynchronous = false
+            options.isNetworkAccessAllowed = true
+
+            PHImageManager.default().requestImageDataAndOrientation(for: asset, options: options) { data, _, _, info in
+                if let cancelled = info?[PHImageCancelledKey] as? Bool, cancelled {
+                    cont.resume(throwing: NSError(
+                        domain: "PhotoCleaner.LiveConvert",
+                        code: 1004,
+                        userInfo: [NSLocalizedDescriptionKey: "Image data request cancelled."]
+                    ))
+                    return
+                }
+                if let error = info?[PHImageErrorKey] as? NSError {
+                    cont.resume(throwing: error)
+                    return
+                }
+                guard let data, !data.isEmpty else {
+                    cont.resume(throwing: NSError(
+                        domain: "PhotoCleaner.LiveConvert",
+                        code: 1005,
+                        userInfo: [NSLocalizedDescriptionKey: "Unable to read image data from asset."]
+                    ))
+                    return
+                }
+                cont.resume(returning: data)
+            }
+        }
     }
 
     // MARK: - Compress video

@@ -71,8 +71,11 @@ struct BlurDetectToolView: View {
                             let toDelete = blurryAssets
                                 .filter { selected.contains($0.asset.localIdentifier) }
                                 .map { PhotoAsset(id: $0.asset.localIdentifier, asset: $0.asset, score: $0.score, isSelected: true) }
-                            try? await PhotoStore.shared.deleteAssets(toDelete)
-                            done = true
+                            do {
+                                try await PhotoStore.shared.deleteAssets(toDelete)
+                                done = true
+                            } catch {
+                            }
                         }
                     }
                 }

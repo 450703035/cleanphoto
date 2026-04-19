@@ -13,7 +13,12 @@
       "Bash(python3)",
       "Bash(python3 -c ':*)",
       "Bash(DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -scheme PhotoCleaner -destination 'platform=iOS Simulator,name=iPhone 15' build)",
-      "Bash(DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -scheme PhotoCleaner -destination 'platform=iOS Simulator,name=iPhone 17 Pro Max' build)"
+      "Bash(DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -scheme PhotoCleaner -destination 'platform=iOS Simulator,name=iPhone 17 Pro Max' build)",
+      "Bash(xcodebuild -project PhotoCleaner.xcodeproj -scheme PhotoCleaner -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' -quiet build)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(xcodebuild -project PhotoCleaner.xcodeproj -scheme PhotoCleaner -destination 'generic/platform=iOS Simulator' -quiet build)",
+      "Bash(xcodebuild -project PhotoCleaner.xcodeproj -scheme PhotoCleaner -destination 'generic/platform=iOS Simulator' -configuration Debug build)"
     ]
   }
 }
