@@ -37,7 +37,11 @@ struct Persona: Identifiable {
 }
 
 enum PersonaCatalog {
-    static let all: [Persona] = [
+    // Computed so language switching (which rebuilds the view tree via
+    // ContentView's .id(appLanguage)) picks up fresh L10n strings instead of
+    // a once-frozen array.
+    static var all: [Persona] {
+        [
         Persona(
             id: .nightOwl,
             symbol: "🌙",
@@ -152,7 +156,8 @@ enum PersonaCatalog {
             endingLine1: L10n.personaEndMinimalistL1,
             endingLine2Html: L10n.personaEndMinimalistL2
         ),
-    ]
+        ]
+    }
 
     static func find(_ id: PersonaID) -> Persona {
         all.first(where: { $0.id == id }) ?? all[0]

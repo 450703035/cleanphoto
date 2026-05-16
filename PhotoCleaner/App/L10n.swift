@@ -391,6 +391,29 @@ enum L10n {
     static var healthImprovement: String { isEn ? "Health Improvement" : "相册健康提升" }
     static var improving: String { isEn ? "Improving" : "持续优化中" }
     static var noData: String { isEn ? "No Data" : "暂无数据" }
+    static var myAchievementsTitle: String { isEn ? "My Cleaning" : "我的清理" }
+    static var freedShort: String { isEn ? "Freed" : "已释放" }
+    static var cleanupsShort: String { isEn ? "Cleanups" : "清理" }
+    static var healthShort: String { isEn ? "Health" : "健康" }
+    static var dataManagement: String { isEn ? "Data" : "数据管理" }
+    static var recentlyDeleted: String { isEn ? "Recently Deleted" : "最近删除" }
+    static var recentlyDeletedDesc: String { isEn ? "Open in Photos app" : "在系统相册中查看" }
+    static var rescanLibrary: String { isEn ? "Rescan Library" : "重新扫描照片库" }
+    static var rescanLibraryDesc: String { isEn ? "Re-score all photos" : "重新评分所有照片" }
+    static var rescanConfirmTitle: String { isEn ? "Rescan Library?" : "确认重新扫描？" }
+    static var rescanConfirmMessage: String { isEn ? "All photos will be re-scored. This may take a few minutes." : "将重新评分所有照片，可能需要几分钟。" }
+    static var rescanAction: String { isEn ? "Rescan" : "重新扫描" }
+    static var aboutSection: String { isEn ? "About" : "关于" }
+    static var feedback: String { isEn ? "Feedback" : "意见反馈" }
+    static var feedbackDesc: String { isEn ? "Send us an email" : "邮件联系我们" }
+    static var rateApp: String { isEn ? "Rate the App" : "给我们评分" }
+    static var rateAppDesc: String { isEn ? "Support us in the App Store" : "App Store 中支持一下" }
+    static var privacyPolicy: String { isEn ? "Privacy Policy" : "隐私政策" }
+    static var privacyPolicyDesc: String { isEn ? "How we handle your data" : "我们如何处理你的数据" }
+    static var privacyPolicyBody: String {
+        isEn ? "PhotoCleaner runs entirely on your device. All photo analysis, scoring and grouping happen locally — no photos, thumbnails, scores or metadata are uploaded to any server.\n\nThe app reads your Photos library only with your permission, and only writes to it when you explicitly delete or convert files. It does not collect personal information, location, or contact data.\n\nWhen you tap “Feedback”, your email client opens with our address pre-filled; the email is sent through your own account on your terms." :
+        "PhotoCleaner 完全在你的设备上运行。所有照片分析、评分与分组都在本地完成，照片、缩略图、评分和元数据都不会上传到任何服务器。\n\n应用仅在你授权后访问相册，仅在你显式删除或转换文件时才会写入。我们不收集个人信息、位置或通讯录。\n\n点击「意见反馈」时，系统邮件会预填我们的地址，邮件通过你自己的账号发送，完全在你的掌控中。"
+    }
 
     // MARK: Tools
     static var cleaningTools: String { isEn ? "Cleaning Tools" : "清理工具" }
