@@ -308,22 +308,25 @@ class LibraryViewModel: ObservableObject {
         for (key, dayAssets) in byDay {
             let parts = key.split(separator: "-").compactMap { Int($0) }
             guard parts.count == 3 else { continue }
+            guard let firstAsset = dayAssets.first else { continue }
             let (y, m, _) = (parts[0], parts[1], parts[2])
             let monthLabel = L10n.monthLabel(m)
-            let title = df.string(from: dayAssets.first!.creationDate)
+            let title = df.string(from: firstAsset.creationDate)
             let folder = AlbumFolder(
                 id: key,
                 title: title,
                 assets: dayAssets.sorted { $0.score > $1.score },
-                date: dayAssets.first!.creationDate
+                date: firstAsset.creationDate
             )
             yearMonthFolders[y, default: [:]][monthLabel, default: []].append(folder)
         }
 
         for y in yearMonthFolders.keys {
-            for m in yearMonthFolders[y]!.keys {
-                yearMonthFolders[y]![m]!.sort { $0.date > $1.date }
+            guard var monthMap = yearMonthFolders[y] else { continue }
+            for m in monthMap.keys {
+                monthMap[m]?.sort { $0.date > $1.date }
             }
+            yearMonthFolders[y] = monthMap
         }
         return yearMonthFolders
     }

@@ -523,19 +523,17 @@ private struct PhotoAccessPage: View {
     }
 
     private func requestPhotoAccess() {
-        PHPhotoLibrary.requestAuthorization(for: .readWrite) { status in
-            DispatchQueue.main.async {
-                switch status {
-                case .authorized, .limited:
-                    authorized = true
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
-                        onNext()
-                    }
-                case .denied, .restricted:
-                    denied = true
-                default:
-                    break
-                }
+        Task { @MainActor in
+            let status = await PHPhotoLibrary.requestAuthorization(for: .readWrite)
+            switch status {
+            case .authorized, .limited:
+                authorized = true
+                try? await Task.sleep(nanoseconds: 600_000_000)
+                onNext()
+            case .denied, .restricted:
+                denied = true
+            default:
+                break
             }
         }
     }
