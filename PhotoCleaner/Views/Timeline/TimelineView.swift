@@ -3,6 +3,7 @@ import Photos
 import CoreLocation
 import AVKit
 import Foundation
+import UIKit
 
 // MARK: - Root
 
@@ -158,11 +159,7 @@ struct TimelineView: View {
                 scanVM.startScan()
             }
         } else if showScanningProgressOnly {
-            TimelineScanningProgressView(
-                progress: scanVM.progress,
-                analyzedCount: scanVM.analyzedCount,
-                elapsedText: scanVM.scanElapsedText
-            )
+            TimelineScanningProgressContainer(progress: scanVM.progressVM)
         } else {
             VStack(spacing: 0) {
                 HStack {
@@ -186,18 +183,10 @@ struct TimelineView: View {
                     .padding(.bottom, 8)
 
                 if scanVM.isBackgroundAnalyzing || scanVM.phase == .scanning {
-                    VStack(spacing: 4) {
-                        ProgressView(value: min(max(scanVM.progress, 0), 1))
-                            .tint(AppColors.lightPurple)
-                            .padding(.horizontal)
-                        Text(
-                            scanVM.isBackgroundAnalyzing && !scanVM.backgroundLabel.isEmpty
-                            ? "时间线整理中 · \(scanVM.backgroundLabel) · 已分析 \(scanVM.analyzedCount) 张"
-                            : "时间线整理中 · 已分析 \(scanVM.analyzedCount) 张"
-                        )
-                            .font(.system(size: 11))
-                            .foregroundColor(AppColors.textSecondary)
-                    }
+                    TimelineInlineProgressBar(
+                        progress: scanVM.progressVM,
+                        isBackgroundAnalyzing: scanVM.isBackgroundAnalyzing
+                    )
                     .padding(.bottom, 6)
                 }
 
@@ -225,13 +214,18 @@ struct TimelineView: View {
                     TimelineListView(
                         vm: vm,
                         onFolderTap: { selectedFolder = $0 },
-                        onTailVisibilityChange: { isListNearTail = $0 }
+                        onTailVisibilityChange: { isListNearTail = $0 },
+                        onScrollChange: { scanVM.setScrolling($0) }
                     )
                 } else if viewMode == .calendar {
                     CalendarContainerView(vm: vm, onDayTap: { selectedDay = $0 },
                                          visibleYear: $calendarYear)
                 } else {
-                    TimelineWaterfallView(vm: vm, scrollScopeID: mediaFilter)
+                    TimelineWaterfallView(
+                        vm: vm,
+                        scrollScopeID: mediaFilter,
+                        onScrollChange: { scanVM.setScrolling($0) }
+                    )
                 }
             }
         }
@@ -548,12 +542,65 @@ private struct TimelineScanningProgressView: View {
     }
 }
 
+// Observes progressVM directly so the outer TimelineView body is not
+// re-evaluated on every progress tick while the full-screen scan UI is shown.
+private struct TimelineScanningProgressContainer: View {
+    @ObservedObject var progress: ScanProgressViewModel
+
+    var body: some View {
+        TimelineScanningProgressView(
+            progress: progress.progress,
+            analyzedCount: progress.analyzedCount,
+            elapsedText: progress.scanElapsedText
+        )
+    }
+}
+
+// Inline "timeline still analyzing" banner. Isolating the reads of
+// progress/backgroundLabel/analyzedCount here means LazyVStack cells above
+// aren't diffed every 0.5s when deep-scan ticks.
+private struct TimelineInlineProgressBar: View {
+    @ObservedObject var progress: ScanProgressViewModel
+    let isBackgroundAnalyzing: Bool
+
+    private var displayedProgress: Double {
+        isBackgroundAnalyzing ? progress.backgroundProgress : progress.progress
+    }
+
+    private var clampedDisplayedProgress: Double {
+        min(max(displayedProgress, 0), 1)
+    }
+
+    var body: some View {
+        VStack(spacing: 4) {
+            ProgressView(value: clampedDisplayedProgress)
+                .tint(AppColors.lightPurple)
+                .padding(.horizontal)
+                .id(progressBarIdentity)
+            Text(
+                isBackgroundAnalyzing && !progress.backgroundLabel.isEmpty
+                ? "时间线整理中 · \(progress.backgroundLabel) · 已分析 \(progress.analyzedCount) 张"
+                : "时间线整理中 · 已分析 \(progress.analyzedCount) 张"
+            )
+                .font(.system(size: 11))
+                .foregroundColor(AppColors.textSecondary)
+        }
+    }
+
+    private var progressBarIdentity: String {
+        "\(isBackgroundAnalyzing)-\(Int(clampedDisplayedProgress * 1000))"
+    }
+}
+
 // MARK: - List view
 
 struct TimelineListView: View {
     @ObservedObject var vm: LibraryViewModel
     let onFolderTap: (AlbumFolder) -> Void
     let onTailVisibilityChange: (Bool) -> Void
+    var onScrollChange: ((Bool) -> Void)? = nil
+    @State private var isScrollInteracting = false
+    @State private var scrollIdleTask: Task<Void, Never>? = nil
     @State private var stickyYear: Int? = nil
     @State private var orderedFolderKeys: [String] = []
     @State private var folderAssetsByKey: [String: [PHAsset]] = [:]
@@ -637,12 +684,25 @@ struct TimelineListView: View {
                                         let folderKey = makeFolderKey(year: year, month: month, index: idx, folder: folder)
                                         AlbumFolderCell(
                                             folder: folder,
-                                            onTap: { onFolderTap(folder) },
-                                            onLongPress: {},
-                                            onAssetLongPress: { asset in requestDeleteAsset(asset) },
                                             onVisible: { markFolderVisible(folderKey) },
                                             onHidden: { markFolderHidden(folderKey) }
                                         )
+                                        .overlay(
+                                            ScrollFriendlyFolderGestureOverlay(
+                                                debugID: folderKey,
+                                                assetCount: folder.assets.count,
+                                                onTap: { onFolderTap(folder) },
+                                                onLongPressAsset: { assetIndex in
+                                                    guard folder.assets.indices.contains(assetIndex) else { return }
+                                                    requestDeleteAsset(folder.assets[assetIndex])
+                                                }
+                                            )
+                                            .allowsHitTesting(true)
+                                        )
+                                        .accessibilityAddTraits(.isButton)
+                                        .accessibilityAction {
+                                            onFolderTap(folder)
+                                        }
                                     }
                                 }
                                 .padding(.horizontal, 14)
@@ -839,6 +899,27 @@ struct TimelineListView: View {
         onTailVisibilityChange(nearTail)
     }
 
+    private func markListScrollInteracting() {
+        scrollIdleTask?.cancel()
+        if !isScrollInteracting {
+            isScrollInteracting = true
+            Self.gestureLog("list scroll changed -> active")
+            onScrollChange?(true)
+        }
+    }
+
+    private func scheduleListScrollIdleFlush() {
+        Self.gestureLog("list scroll ended -> schedule idle")
+        scrollIdleTask?.cancel()
+        scrollIdleTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 450_000_000)
+            guard !Task.isCancelled else { return }
+            isScrollInteracting = false
+            Self.gestureLog("list scroll idle")
+            onScrollChange?(false)
+        }
+    }
+
     private func requestDeleteAsset(_ asset: PhotoAsset) {
         pendingDeleteAsset = asset
         showLongPressDeleteAlert = true
@@ -855,6 +936,162 @@ struct TimelineListView: View {
         }
     }
 
+    private static func gestureLog(_ message: String) {
+        #if DEBUG
+        print("[TimelineGesture] \(message)")
+        #endif
+    }
+}
+
+private struct ScrollFriendlyFolderGestureOverlay: UIViewRepresentable {
+    let debugID: String
+    let assetCount: Int
+    let onTap: () -> Void
+    let onLongPressAsset: (Int) -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(debugID: debugID, onTap: onTap, onLongPressAsset: onLongPressAsset)
+    }
+
+    func makeUIView(context: Context) -> UIView {
+        let view = UIView()
+        view.backgroundColor = .clear
+
+        let tap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleTap(_:)))
+        tap.cancelsTouchesInView = false
+        tap.delaysTouchesBegan = false
+        tap.delaysTouchesEnded = false
+        tap.delegate = context.coordinator
+        view.addGestureRecognizer(tap)
+
+        let longPress = UILongPressGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleLongPress(_:)))
+        longPress.minimumPressDuration = 0.6
+        longPress.allowableMovement = 12
+        longPress.cancelsTouchesInView = false
+        longPress.delaysTouchesBegan = false
+        longPress.delaysTouchesEnded = false
+        longPress.delegate = context.coordinator
+        view.addGestureRecognizer(longPress)
+
+        return view
+    }
+
+    func updateUIView(_ uiView: UIView, context: Context) {
+        context.coordinator.debugID = debugID
+        context.coordinator.assetCount = assetCount
+        context.coordinator.onTap = onTap
+        context.coordinator.onLongPressAsset = onLongPressAsset
+    }
+
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        var debugID: String
+        var assetCount: Int = 0
+        var onTap: () -> Void
+        var onLongPressAsset: (Int) -> Void
+
+        init(debugID: String, onTap: @escaping () -> Void, onLongPressAsset: @escaping (Int) -> Void) {
+            self.debugID = debugID
+            self.onTap = onTap
+            self.onLongPressAsset = onLongPressAsset
+        }
+
+        @objc func handleTap(_ recognizer: UITapGestureRecognizer) {
+            log("tap state=\(recognizer.state.debugName)")
+            guard recognizer.state == .ended else { return }
+            onTap()
+        }
+
+        @objc func handleLongPress(_ recognizer: UILongPressGestureRecognizer) {
+            log("longPress state=\(recognizer.state.debugName)")
+            guard recognizer.state == .began, let view = recognizer.view else { return }
+            let index = assetIndex(at: recognizer.location(in: view), in: view.bounds.size)
+            guard index < assetCount else { return }
+            log("longPress assetIndex=\(index)")
+            onLongPressAsset(index)
+        }
+
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+            let location = touch.location(in: gestureRecognizer.view)
+            log("\(gestureRecognizer.debugName) shouldReceive touch location=(\(Int(location.x)),\(Int(location.y)))")
+            return true
+        }
+
+        func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+            log("\(gestureRecognizer.debugName) shouldBegin scrollState=\(scrollStateDescription(from: gestureRecognizer.view))")
+            return true
+        }
+
+        func gestureRecognizer(
+            _ gestureRecognizer: UIGestureRecognizer,
+            shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
+        ) -> Bool {
+            let allow = isPanLikeGesture(otherGestureRecognizer)
+            log("\(gestureRecognizer.debugName) simultaneousWith=\(otherGestureRecognizer.debugName) allow=\(allow)")
+            return allow
+        }
+
+        func gestureRecognizer(
+            _ gestureRecognizer: UIGestureRecognizer,
+            shouldBeRequiredToFailBy otherGestureRecognizer: UIGestureRecognizer
+        ) -> Bool {
+            let require = isPanLikeGesture(otherGestureRecognizer)
+            log("\(gestureRecognizer.debugName) shouldBeRequiredToFailBy=\(otherGestureRecognizer.debugName) require=\(require)")
+            return require
+        }
+
+        private func assetIndex(at point: CGPoint, in size: CGSize) -> Int {
+            guard size.width > 0, size.height > 0 else { return 0 }
+            let column = point.x < size.width / 2 ? 0 : 1
+            let row = point.y < size.height / 2 ? 0 : 1
+            return row * 2 + column
+        }
+
+        private func isPanLikeGesture(_ recognizer: UIGestureRecognizer) -> Bool {
+            recognizer is UIPanGestureRecognizer || recognizer.debugName.contains("PanGesture")
+        }
+
+        private func scrollStateDescription(from view: UIView?) -> String {
+            guard let scrollView = nearestScrollView(from: view) else { return "missing" }
+            return "tracking=\(scrollView.isTracking),dragging=\(scrollView.isDragging),decelerating=\(scrollView.isDecelerating),offsetY=\(Int(scrollView.contentOffset.y))"
+        }
+
+        private func nearestScrollView(from view: UIView?) -> UIScrollView? {
+            var current = view
+            while let candidate = current {
+                if let scrollView = candidate as? UIScrollView {
+                    return scrollView
+                }
+                current = candidate.superview
+            }
+            return nil
+        }
+
+        private func log(_ message: String) {
+            #if DEBUG
+            print("[TimelineGesture] card=\(debugID) \(message)")
+            #endif
+        }
+    }
+}
+
+private extension UIGestureRecognizer {
+    var debugName: String {
+        String(describing: type(of: self))
+    }
+}
+
+private extension UIGestureRecognizer.State {
+    var debugName: String {
+        switch self {
+        case .possible: return "possible"
+        case .began: return "began"
+        case .changed: return "changed"
+        case .ended: return "ended"
+        case .cancelled: return "cancelled"
+        case .failed: return "failed"
+        @unknown default: return "unknown"
+        }
+    }
 }
 
 // MARK: - Waterfall view
@@ -862,6 +1099,7 @@ struct TimelineListView: View {
 struct TimelineWaterfallView: View {
     @ObservedObject var vm: LibraryViewModel
     let scrollScopeID: TimelineView.MediaKindFilter
+    var onScrollChange: ((Bool) -> Void)? = nil
     private struct LayoutCacheKey: Hashable {
         let scope: TimelineView.MediaKindFilter
         let width: Int
@@ -1268,6 +1506,7 @@ struct TimelineWaterfallView: View {
     private func markScrollInteracting() {
         if !isScrollInteracting {
             isScrollInteracting = true
+            onScrollChange?(true)
         }
         if playingVideoAssetID != nil {
             playingVideoAssetID = nil
@@ -1281,6 +1520,7 @@ struct TimelineWaterfallView: View {
             try? await Task.sleep(nanoseconds: 450_000_000)
             guard !Task.isCancelled else { return }
             self.isScrollInteracting = false
+            self.onScrollChange?(false)
             if let latest = self.pendingAssetsSnapshot {
                 self.pendingAssetsSnapshot = nil
                 Self.perfLog(
@@ -1437,7 +1677,7 @@ private struct TimelineWaterfallCell: View {
                     onPhotoTap()
                 }
             }
-            .onLongPressGesture(minimumDuration: 0.6, perform: onLongPress)
+            .simultaneousGesture(LongPressGesture(minimumDuration: 0.6).onEnded { _ in onLongPress() })
 
             HStack(alignment: .center, spacing: 8) {
                 VStack(alignment: .leading, spacing: 2) {

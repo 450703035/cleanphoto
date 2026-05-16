@@ -404,6 +404,10 @@ struct ScreenshotCleanView: View {
             return assets[idx]
         }
     }
+    private var availableCategories: [ScreenshotCategory] {
+        let visible = Set(categoryMap.values)
+        return ScreenshotCategory.allCases.filter { visible.contains($0) }
+    }
     private var isAllSelected: Bool {
         !selectionTargetIndices.isEmpty && selectionTargetIndices.allSatisfy { assets[$0].isSelected }
     }
@@ -435,7 +439,7 @@ struct ScreenshotCleanView: View {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 8) {
                             FilterChip(label: L10n.all, isActive: filterCategory == nil) { filterCategory = nil }
-                            ForEach(ScreenshotCategory.allCases, id: \.self) { c in
+                            ForEach(availableCategories, id: \.self) { c in
                                 FilterChip(label: c.chipLabel, isActive: filterCategory == c) { filterCategory = c }
                             }
                         }
@@ -565,7 +569,8 @@ struct ScreenshotCleanView: View {
         var cachedMap: [String: ScreenshotCategory] = [:]
         cachedMap.reserveCapacity(cachedRows.count)
         for (id, raw) in cachedRows {
-            if let category = ScreenshotCategory(rawValue: raw) {
+            if let category = ScreenshotCategory(rawValue: raw),
+               ScreenshotCategory.sourceCases.contains(category) || category == .other {
                 cachedMap[id] = category
             }
         }

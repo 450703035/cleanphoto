@@ -284,15 +284,16 @@ enum ScoringConfig {
     static let lowQualityThreshold = 35
 
     // Duplicate detection
-    static let duplicateCandidateTimeBucketSeconds: TimeInterval = 8
+    static let duplicateCandidateTimeBucketSeconds: TimeInterval = 600
     static let duplicateMaxFeatureDistance: Float = 0.06
     static let duplicateMaxHashDistance = 6
     static let duplicateMaxFileSizeDeltaBytes: Int64 = 64 * 1024
+    static let duplicateSoftFileSizeDeltaRatio: Double = 0.18
     static let hashThumbnailWidth: CGFloat = 9
     static let hashThumbnailHeight: CGFloat = 8
 
     // Similar detection
-    static let similarCaptureGapSeconds: TimeInterval = 3
+    static let similarCaptureGapSeconds: TimeInterval = 30
     static let similarMaxFeatureDistance: Float = 0.12
     static let similarMaxHashDistance = 14
 

@@ -552,7 +552,7 @@ private struct StartScanPage: View {
         ZStack {
             AppColors.darkBG.ignoresSafeArea()
             if started {
-                ScanningView(vm: scanVM, showsCancel: false)
+                ScanningView(vm: scanVM, progress: scanVM.progressVM, showsCancel: false)
             } else {
                 ScanIdleView(onStart: startScan)
             }

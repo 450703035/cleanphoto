@@ -3,6 +3,46 @@ import Vision
 import CoreImage
 import UIKit
 
+// Actor-based semaphore that caps the number of simultaneous PHImageManager
+// decode requests across all background callers. Supports dynamic capacity so
+// scroll activity can pause background decodes entirely (capacity 0).
+private actor DecodePermit {
+    private var capacity: Int
+    private var taken = 0
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    init(_ capacity: Int) { self.capacity = capacity }
+
+    func acquire() async {
+        if capacity > 0 && taken < capacity {
+            taken += 1
+            return
+        }
+        // Suspend until release() or setCapacity() drains us.
+        // drainWaiters() increments taken before resuming, so we just return.
+        await withCheckedContinuation { waiters.append($0) }
+    }
+
+    func release() {
+        if taken > 0 { taken -= 1 }
+        drainWaiters()
+    }
+
+    /// Change the maximum concurrent slot count.
+    /// Pass 0 to pause all pending and future acquisitions until capacity is raised.
+    func setCapacity(_ n: Int) {
+        capacity = max(0, n)
+        drainWaiters()
+    }
+
+    private func drainWaiters() {
+        while capacity > 0 && taken < capacity && !waiters.isEmpty {
+            taken += 1
+            waiters.removeFirst().resume()
+        }
+    }
+}
+
 /// Central service that reads PHPhotoLibrary and performs AI scoring.
 /// All heavy work happens on a background queue; results are published on main.
 class PhotoLibraryService: ObservableObject {
@@ -14,6 +54,13 @@ class PhotoLibraryService: ObservableObject {
     private let decodeFailureTTL: TimeInterval = 180
     private let decodeFailureLock = NSLock()
     private var decodeFailedAssetIds: [String: Date] = [:]
+
+    // Shared decode permit: max 1 concurrent PHImageManager image request from
+    // background analysis tasks at any time. Timeline's PHCachingImageManager
+    // adds its own concurrent requests on top, so keeping ours at 1 prevents
+    // combined saturation of the HEIC hardware decoder (CMPhotoDecompressionSession
+    // err=-16990). Slower than 2, but no frame drops or decoder overloads.
+    private let decodePermit = DecodePermit(1)
 
     // MARK: - Permission
     func requestAuthorization() async -> Bool {
@@ -75,6 +122,14 @@ class PhotoLibraryService: ObservableObject {
         decodeFailureLock.lock()
         decodeFailedAssetIds.removeAll()
         decodeFailureLock.unlock()
+    }
+
+    /// Pause (capacity=0) or resume (capacity=1) background image decodes.
+    /// Called by ScanViewModel when the user starts or stops scrolling Timeline,
+    /// so the HEIC hardware decoder is fully available to PHCachingImageManager
+    /// for thumb rendering during scroll.
+    func setScrollActive(_ scrolling: Bool) async {
+        await decodePermit.setCapacity(scrolling ? 0 : 1)
     }
 
     // MARK: - Fill real file sizes in background (for visible subsets)
@@ -567,11 +622,12 @@ class PhotoLibraryService: ObservableObject {
         var used = Set<String>()
 
         // Fast path: exact metadata duplicates (same dimensions + same file size).
-        // This catches true file-level duplicates without costly image decoding.
+        // Use photo.sizeBytes (already populated from scoring phase) instead of
+        // assetFileSize() to avoid synchronous XPC calls to Photos.sqlite here —
+        // those are the source of CoreData err=4099 after heavy scanning.
         var exactBuckets: [String: [PhotoAsset]] = [:]
         for photo in images {
-            let fileSize = assetFileSize(photo.asset) ?? photo.sizeBytes
-            let key = "\(photo.asset.pixelWidth)x\(photo.asset.pixelHeight)-\(fileSize)"
+            let key = "\(photo.asset.pixelWidth)x\(photo.asset.pixelHeight)-\(photo.sizeBytes)"
             exactBuckets[key, default: []].append(photo)
         }
         for bucket in exactBuckets.values where bucket.count > 1 {
@@ -608,8 +664,7 @@ class PhotoLibraryService: ObservableObject {
                 let feature = await featurePrint(for: photo.asset)
                 let hash = await perceptualHash(for: photo.asset)
                 if feature == nil && hash == nil { continue }
-                let fileSize = assetFileSize(photo.asset) ?? photo.sizeBytes
-                candidates.append(Candidate(asset: photo, feature: feature, hash: hash, fileSize: fileSize))
+                candidates.append(Candidate(asset: photo, feature: feature, hash: hash, fileSize: photo.sizeBytes))
 
                 localProcessed += 1
                 if localProcessed == 1 || localProcessed % 24 == 0 || localProcessed == localTotal {
@@ -636,9 +691,6 @@ class PhotoLibraryService: ObservableObject {
                     let other = candidates[j]
                     guard !used.contains(other.asset.id) else { continue }
 
-                    let sizeDelta = abs(base.fileSize - other.fileSize)
-                    guard sizeDelta <= ScoringConfig.duplicateMaxFileSizeDeltaBytes else { continue }
-
                     let byFeature: Bool = {
                         guard let a = base.feature, let b = other.feature,
                               let d = featureDistance(a, b) else { return false }
@@ -649,7 +701,16 @@ class PhotoLibraryService: ObservableObject {
                         return hammingDistance(a, b) <= ScoringConfig.duplicateMaxHashDistance
                     }()
 
-                    if byFeature || byHash {
+                    let sizeDelta = abs(base.fileSize - other.fileSize)
+                    let largerSize = max(base.fileSize, other.fileSize)
+                    let softSizeLimit = max(
+                        ScoringConfig.duplicateMaxFileSizeDeltaBytes,
+                        Int64(Double(largerSize) * ScoringConfig.duplicateSoftFileSizeDeltaRatio)
+                    )
+                    let sizeCompatible = sizeDelta <= softSizeLimit
+                    let stronglyVisualMatch = byFeature && byHash
+
+                    if (sizeCompatible && (byFeature || byHash)) || stronglyVisualMatch {
                         cluster.append(other.asset)
                         used.insert(other.asset.id)
                     }
@@ -825,10 +886,14 @@ class PhotoLibraryService: ObservableObject {
             }
     }
 
-    // MARK: - Screenshot semantic classification (local Vision heuristics)
+    // MARK: - Screenshot source classification (Core ML, with Vision fallback)
     func classifyScreenshot(_ asset: PHAsset) async -> ScreenshotCategory {
         guard let cg = await requestCGImage(asset: asset, targetSize: CGSize(width: 768, height: 768)) else {
             return .other
+        }
+
+        if let category = ScreenshotSourceModelRunner.shared.classify(cgImage: cg) {
+            return category
         }
 
         if containsQRCode(cgImage: cg) {
@@ -1127,26 +1192,31 @@ class PhotoLibraryService: ObservableObject {
         let resources = PHAssetResource.assetResources(for: asset)
         guard !resources.isEmpty else { return nil }
 
-        // Prefer the primary resource for the media type; fallback to the largest resource.
-        let preferredTypes: Set<PHAssetResourceType> = {
-            if asset.mediaType == .video {
-                return [.video, .fullSizeVideo]
-            }
-            return [.photo, .fullSizePhoto]
-        }()
+        let storageResourceTypes: Set<PHAssetResourceType> = [
+            .photo,
+            .fullSizePhoto,
+            .alternatePhoto,
+            .video,
+            .fullSizeVideo,
+            .pairedVideo,
+            .fullSizePairedVideo,
+            .adjustmentData,
+            .adjustmentBasePhoto,
+            .adjustmentBasePairedVideo
+        ]
 
-        var preferredMax: Int64 = 0
+        var storageTotal: Int64 = 0
         var overallMax: Int64 = 0
         for resource in resources {
             guard let bytes = (resource.value(forKey: "fileSize") as? NSNumber)?.int64Value, bytes > 0 else {
                 continue
             }
             overallMax = max(overallMax, bytes)
-            if preferredTypes.contains(resource.type) {
-                preferredMax = max(preferredMax, bytes)
+            if storageResourceTypes.contains(resource.type) {
+                storageTotal += bytes
             }
         }
-        if preferredMax > 0 { return preferredMax }
+        if storageTotal > 0 { return storageTotal }
         return overallMax > 0 ? overallMax : nil
     }
 
@@ -1188,13 +1258,24 @@ class PhotoLibraryService: ObservableObject {
         let assetId = asset.localIdentifier
         if hasDecodeFailed(assetId: assetId) { return nil }
 
+        // Throttle: wait for a decode slot before issuing the PHImageManager
+        // request. This caps simultaneous hardware HEIC/JPEG decodes and
+        // prevents CMPhotoDecompressionSession err=-16990 under heavy load.
+        await decodePermit.acquire()
+        defer { Task { await decodePermit.release() } }
+
         return await withCheckedContinuation { (cont: CheckedContinuation<UIImage?, Never>) in
             let manager = PHImageManager.default()
             let opts = PHImageRequestOptions()
-            opts.deliveryMode = .opportunistic
+            opts.deliveryMode = .highQualityFormat
             opts.resizeMode = .fast
             opts.isSynchronous = false
-            opts.isNetworkAccessAllowed = true
+            // Do NOT allow iCloud network fetches during background analysis.
+            // PHImageManager downloading partial iCloud HEICs is the primary
+            // source of CMPhotoDecompressionSession err=-16990. Photos not
+            // locally cached return PHImageResultIsInCloudKey=true → nil, which
+            // the callers already handle gracefully (neutral score / skip).
+            opts.isNetworkAccessAllowed = false
             configure?(opts)
 
             let lock = NSLock()

@@ -30,7 +30,12 @@
 		A021 /* SwipeDeleteToolView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F021 /* SwipeDeleteToolView.swift */; };
 		A022 /* ToolSharedSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = F022 /* ToolSharedSupport.swift */; };
 		A023 /* L10n.swift in Sources */ = {isa = PBXBuildFile; fileRef = F023 /* L10n.swift */; };
-		2011E0A28EDF4F65296BB37A /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F4316D49BC3101C62AC8D7E /* OnboardingView.swift */; };
+			A024 /* InsightsComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = F024 /* InsightsComponents.swift */; };
+			A025 /* InsightsModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = F025 /* InsightsModels.swift */; };
+			A026 /* AnnualReportView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F026 /* AnnualReportView.swift */; };
+		A027 /* ScreenshotSourceModelRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = F027 /* ScreenshotSourceModelRunner.swift */; };
+		A028 /* ScreenshotSourceClassifier.mlmodel in Resources */ = {isa = PBXBuildFile; fileRef = F028 /* ScreenshotSourceClassifier.mlmodel */; };
+			2011E0A28EDF4F65296BB37A /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F4316D49BC3101C62AC8D7E /* OnboardingView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -57,7 +62,12 @@
 		F021 /* SwipeDeleteToolView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwipeDeleteToolView.swift; sourceTree = "<group>"; };
 		F022 /* ToolSharedSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolSharedSupport.swift; sourceTree = "<group>"; };
 		F023 /* L10n.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = L10n.swift; sourceTree = "<group>"; };
-		FAPP /* PhotoCleaner.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PhotoCleaner.app; sourceTree = BUILT_PRODUCTS_DIR; };
+			F024 /* InsightsComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InsightsComponents.swift; sourceTree = "<group>"; };
+			F025 /* InsightsModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InsightsModels.swift; sourceTree = "<group>"; };
+			F026 /* AnnualReportView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnnualReportView.swift; sourceTree = "<group>"; };
+		F027 /* ScreenshotSourceModelRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenshotSourceModelRunner.swift; sourceTree = "<group>"; };
+		F028 /* ScreenshotSourceClassifier.mlmodel */ = {isa = PBXFileReference; lastKnownFileType = file.mlmodel; path = ScreenshotSourceClassifier.mlmodel; sourceTree = "<group>"; };
+			FAPP /* PhotoCleaner.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PhotoCleaner.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		7F4316D49BC3101C62AC8D7E /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -92,6 +102,16 @@
 			path = Home;
 			sourceTree = "<group>";
 		};
+			GRP_INSIGHTS /* Insights */ = {
+				isa = PBXGroup;
+				children = (
+					F024 /* InsightsComponents.swift */,
+					F025 /* InsightsModels.swift */,
+					F026 /* AnnualReportView.swift */,
+				);
+				path = Insights;
+				sourceTree = "<group>";
+			};
 		GRP_MODELS /* Models */ = {
 			isa = PBXGroup;
 			children = (
@@ -116,9 +136,18 @@
 				GRP_SERVICES /* Services */,
 				GRP_VMS /* ViewModels */,
 				GRP_VIEWS /* Views */,
+				GRP_RES /* Resources */,
 				GRP_PRODUCTS /* Products */,
 			);
 			path = PhotoCleaner;
+			sourceTree = "<group>";
+		};
+		GRP_RES /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				F028 /* ScreenshotSourceClassifier.mlmodel */,
+			);
+			path = Resources;
 			sourceTree = "<group>";
 		};
 		GRP_SERVICES /* Services */ = {
@@ -127,6 +156,7 @@
 				F005 /* PhotoLibraryService.swift */,
 				F014 /* DatabaseService.swift */,
 				F015 /* PhotoStore.swift */,
+				F027 /* ScreenshotSourceModelRunner.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -176,6 +206,7 @@
 				F3FD5E561A407B156CE148F7 /* Onboarding */,
 				GRP_SHARED /* Shared */,
 				GRP_HOME /* Home */,
+				GRP_INSIGHTS /* Insights */,
 				GRP_TIMELINE /* Timeline */,
 				GRP_TOOLS /* Tools */,
 				GRP_SETTINGS /* Settings */,
@@ -259,6 +290,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A028 /* ScreenshotSourceClassifier.mlmodel in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -285,6 +317,7 @@
 				A013 /* SettingsView.swift in Sources */,
 				A014 /* DatabaseService.swift in Sources */,
 				A015 /* PhotoStore.swift in Sources */,
+				A027 /* ScreenshotSourceModelRunner.swift in Sources */,
 				A016 /* LivePhotoToolView.swift in Sources */,
 				A017 /* VideoCompressToolView.swift in Sources */,
 				A018 /* BlurDetectToolView.swift in Sources */,
@@ -292,8 +325,11 @@
 				A020 /* SmartAlbumToolView.swift in Sources */,
 				A021 /* SwipeDeleteToolView.swift in Sources */,
 				A022 /* ToolSharedSupport.swift in Sources */,
-				A023 /* L10n.swift in Sources */,
-			);
+					A023 /* L10n.swift in Sources */,
+					A024 /* InsightsComponents.swift in Sources */,
+					A025 /* InsightsModels.swift in Sources */,
+					A026 /* AnnualReportView.swift in Sources */,
+				);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */

@@ -35,7 +35,12 @@ final class ThumbnailCacheManager {
 
     func startCaching(_ assets: [PHAsset], targetSize: CGSize, contentMode: PHImageContentMode) {
         guard !assets.isEmpty else { return }
-        manager.startCachingImages(for: assets, targetSize: targetSize, contentMode: contentMode, options: nil)
+        let opts = PHImageRequestOptions()
+        opts.deliveryMode = .opportunistic
+        opts.resizeMode = .fast
+        opts.isSynchronous = false
+        opts.isNetworkAccessAllowed = false
+        manager.startCachingImages(for: assets, targetSize: targetSize, contentMode: contentMode, options: opts)
     }
 
     func stopCaching(_ assets: [PHAsset], targetSize: CGSize, contentMode: PHImageContentMode) {
@@ -390,9 +395,6 @@ struct SettingsToggleRow: View {
 // MARK: - Album folder thumbnail
 struct AlbumFolderCell: View {
     let folder: AlbumFolder
-    var onTap: () -> Void
-    var onLongPress: () -> Void
-    var onAssetLongPress: (PhotoAsset) -> Void = { _ in }
     var onVisible: () -> Void = {}
     var onHidden: () -> Void = {}
 
@@ -405,9 +407,6 @@ struct AlbumFolderCell: View {
                         .aspectRatio(1, contentMode: .fill)
                         .clipped()
                         .opacity(folder.recommendDelete ? 0.5 : 1)
-                        .onLongPressGesture(minimumDuration: 0.6) {
-                            onAssetLongPress(asset)
-                        }
                 }
                 if folder.assets.count < 4 {
                     ForEach(0..<(4 - min(folder.assets.count, 4)), id: \.self) { _ in
@@ -460,8 +459,6 @@ struct AlbumFolderCell: View {
             }
         }
         .aspectRatio(1, contentMode: .fit)
-        .onTapGesture(perform: onTap)
-        .onLongPressGesture(minimumDuration: 0.6, perform: onLongPress)
         .onAppear(perform: onVisible)
         .onDisappear(perform: onHidden)
     }

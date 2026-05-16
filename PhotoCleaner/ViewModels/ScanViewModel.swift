@@ -2,23 +2,67 @@ import SwiftUI
 import Photos
 import Combine
 
+/// Holds high-frequency scan progress state in its own ObservableObject so that
+/// per-photo / per-second updates do not invalidate the entire ScanViewModel
+/// graph (Home dashboard, Timeline, etc.). Views that actually display progress
+/// observe this directly; everything else observes ScanViewModel only.
+@MainActor
+final class ScanProgressViewModel: ObservableObject {
+    @Published var progress: Double = 0
+    @Published var phaseLabel: String = L10n.scanPhase1
+    @Published var analyzedCount: Int = 0
+    @Published var scanElapsedSeconds: Int = 0
+    @Published var backgroundProgress: Double = 0
+    @Published var backgroundLabel: String = ""
+
+    var scanElapsedText: String {
+        ScanViewModel.formatDuration(scanElapsedSeconds)
+    }
+}
+
 @MainActor
 class ScanViewModel: ObservableObject {
     @Published var phase: ScanPhase = .idle
     @Published private(set) var isInitialLaunchPreparing: Bool = true
-    @Published var progress: Double = 0
-    @Published var phaseLabel: String = L10n.scanPhase1
-    @Published var analyzedCount: Int = 0
     @Published var summary: LibrarySummary = LibrarySummary()
     @Published var authorized: Bool = false
-    @Published var scanElapsedSeconds: Int = 0
     @Published var lastScanDurationSeconds: Int = 0
     @Published var isBackgroundAnalyzing: Bool = false
-    @Published var backgroundProgress: Double = 0
-    @Published var backgroundLabel: String = ""
     @Published private(set) var isUserInteractingInDetail: Bool = false
     @Published private(set) var timelineVisibleAssets: [PhotoAsset] = []
     @Published private(set) var timelineCanShowAssets: Bool = false
+
+    /// Sub-ObservableObject for per-photo / per-second progress updates.
+    /// Views that show progress should observe this directly; everything else
+    /// keeps observing ScanViewModel and is no longer invalidated per tick.
+    let progressVM = ScanProgressViewModel()
+
+    // Forwarders so existing call sites inside ScanViewModel keep compiling
+    // unchanged. Only the storage (and the publisher) moves.
+    var progress: Double {
+        get { progressVM.progress }
+        set { progressVM.progress = newValue }
+    }
+    var phaseLabel: String {
+        get { progressVM.phaseLabel }
+        set { progressVM.phaseLabel = newValue }
+    }
+    var analyzedCount: Int {
+        get { progressVM.analyzedCount }
+        set { progressVM.analyzedCount = newValue }
+    }
+    var scanElapsedSeconds: Int {
+        get { progressVM.scanElapsedSeconds }
+        set { progressVM.scanElapsedSeconds = newValue }
+    }
+    var backgroundProgress: Double {
+        get { progressVM.backgroundProgress }
+        set { progressVM.backgroundProgress = newValue }
+    }
+    var backgroundLabel: String {
+        get { progressVM.backgroundLabel }
+        set { progressVM.backgroundLabel = newValue }
+    }
 
     @Published var duplicateGroups: [PhotoGroup] = []
     @Published var similarGroups:   [PhotoGroup] = []
@@ -29,6 +73,7 @@ class ScanViewModel: ObservableObject {
     @Published var favorites:       [PhotoAsset] = []
     @Published var behaviorAssets:  [PhotoAsset] = []
     @Published var allAssets:       [PhotoAsset] = []
+    @Published private(set) var fileSizeVersion: Int = 0
 
     private let service = PhotoLibraryService.shared
     private let store   = PhotoStore.shared
@@ -37,7 +82,10 @@ class ScanViewModel: ObservableObject {
     private var scanClockTask: Task<Void, Never>?
     private var metadataWarmupTask: Task<Void, Never>?
     private var launchIncrementalSyncTask: Task<Void, Never>?
+    private var transientInteractionTask: Task<Void, Never>?
+    private var isScrollInteracting = false
     private let timelineRevealSeconds = 20
+    private let firstRevealPreheatLimit = 420
     private var lifetimeReleasedBytes: Int64 = 0
     private var cancellables = Set<AnyCancellable>()
 
@@ -244,6 +292,7 @@ class ScanViewModel: ObservableObject {
         backgroundProgress = 0
         backgroundLabel = ""
         phase = .done
+        startImagePreheating(assets: scored)
         startBackgroundFileSizeHydration()
     }
 
@@ -268,6 +317,7 @@ class ScanViewModel: ObservableObject {
         scanTask?.cancel()
         backgroundAnalysisTask?.cancel()
         scanClockTask?.cancel()
+        transientInteractionTask?.cancel()
         phase = .idle; progress = 0; analyzedCount = 0
         summary = LibrarySummary()
         summary.releasedBytes = lifetimeReleasedBytes
@@ -279,11 +329,74 @@ class ScanViewModel: ObservableObject {
         screenshots = []; temporaryRecords = []; videos = []; lowQuality = []; favorites = []; behaviorAssets = []; allAssets = []
         timelineVisibleAssets = []
         timelineCanShowAssets = false
+        isUserInteractingInDetail = false
+        isScrollInteracting = false
+        Task { await service.setScrollActive(false) }
     }
 
     func setDetailInteraction(_ active: Bool) {
         guard isUserInteractingInDetail != active else { return }
         isUserInteractingInDetail = active
+    }
+
+    /// Called by Timeline scroll handlers (list + waterfall) when the user
+    /// starts or stops actively scrolling. Pauses background image decodes so
+    /// PHCachingImageManager has full hardware-decoder access during scroll.
+    func setScrolling(_ active: Bool) {
+        guard isScrollInteracting != active else { return }
+        isScrollInteracting = active
+        updateBackgroundDecodePressure()
+    }
+
+    /// Short-lived priority boost used while switching tabs. The transition itself
+    /// is often when SwiftUI lays out new grids and asks PhotoKit for thumbnails.
+    func markForegroundTransition(duration: TimeInterval = 1.25) {
+        transientInteractionTask?.cancel()
+        Task { await service.setScrollActive(true) }
+        transientInteractionTask = Task { [weak self] in
+            let ns = UInt64(max(0.2, duration) * 1_000_000_000)
+            try? await Task.sleep(nanoseconds: ns)
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                self?.transientInteractionTask = nil
+                self?.updateBackgroundDecodePressure()
+            }
+        }
+    }
+
+    private func updateBackgroundDecodePressure() {
+        // `isUserInteractingInDetail` lowers deep-scan worker concurrency elsewhere,
+        // but it must not hold the global decode permit at 0 for the whole time a
+        // Timeline/Clean screen is visible. Otherwise background scoring can never
+        // acquire a PhotoKit decode slot and progress appears stuck.
+        let shouldPauseBackgroundDecodes = isScrollInteracting || transientInteractionTask != nil
+        Task { await service.setScrollActive(shouldPauseBackgroundDecodes) }
+    }
+
+    /// Prime ThumbnailCacheManager with the Timeline's standard preheat size
+    /// (180pt × screen-scale). iOS manages the actual decode/cache in the
+    /// background; subsequent Timeline cell requests are served from cache
+    /// without touching the HEIC hardware decoder.
+    private func startImagePreheating(assets: [PhotoAsset]) {
+        guard !assets.isEmpty else { return }
+        let scale = UIScreen.main.scale
+        let size = CGSize(width: 180 * scale, height: 180 * scale)
+        // Limit to the first 600 assets (newest-first order matches Timeline top)
+        // to avoid flooding the system cache with the full library.
+        let batch = Array(assets.prefix(600))
+        let phAssets = batch.map { $0.asset }
+        ThumbnailCacheManager.shared.startCaching(phAssets, targetSize: size, contentMode: .aspectFill)
+    }
+
+    private func startFirstRevealImagePreheating(assets: [PhotoAsset]) {
+        guard !assets.isEmpty else { return }
+        let batch = Array(assets.prefix(firstRevealPreheatLimit)).map(\.asset)
+        guard !batch.isEmpty else { return }
+        let scale = UIScreen.main.scale
+        let timelineSize = CGSize(width: 180 * scale, height: 180 * scale)
+        let cleanGridSize = CGSize(width: 120 * scale, height: 120 * scale)
+        ThumbnailCacheManager.shared.startCaching(batch, targetSize: timelineSize, contentMode: .aspectFill)
+        ThumbnailCacheManager.shared.startCaching(batch, targetSize: cleanGridSize, contentMode: .aspectFill)
     }
 
     /// If the app was backgrounded/locked and scan workers got interrupted,
@@ -307,20 +420,8 @@ class ScanViewModel: ObservableObject {
         }
 
         if phase == .done, deepInterrupted {
-            // Returning to foreground should never bounce users back to full-screen scan UI.
-            isBackgroundAnalyzing = false
-            backgroundProgress = 0
-            backgroundLabel = ""
-        }
-
-        // Defensive recovery: if deep-analysis appears active when returning from
-        // background, restart the background catch-up path to avoid a stuck state.
-        if phase == .done, isBackgroundAnalyzing {
-            backgroundAnalysisTask?.cancel()
-            backgroundAnalysisTask = nil
-            isBackgroundAnalyzing = false
-            backgroundProgress = 0
-            backgroundLabel = ""
+            restartBackgroundDeepAnalysisFromCurrentLibrary()
+            return
         }
 
         // On every foreground activation, silently catch up newly-added photos.
@@ -491,8 +592,6 @@ class ScanViewModel: ObservableObject {
                 initialScored: scored,
                 cached: cached,
                 initialScannedIDs: scannedIDs,
-                duplicateSeed: warmedDup,
-                similarSeed: warmedSim,
                 ids: ids,
                 newAssetIDs: newAssetIDs,
                 scanStart: scanStart
@@ -537,8 +636,6 @@ class ScanViewModel: ObservableObject {
         initialScored: [PhotoAsset],
         cached: [String: DatabaseService.CachedScore],
         initialScannedIDs: Set<String>,
-        duplicateSeed: [PhotoGroup],
-        similarSeed: [PhotoGroup],
         ids: [String],
         newAssetIDs: Set<String>,
         scanStart: Date
@@ -557,7 +654,6 @@ class ScanViewModel: ObservableObject {
         let uncached = (0..<raw.count).filter { cached[raw[$0].id] == nil }
         let baseAnalyzedCount = initialScannedIDs.count
         analyzedCount = baseAnalyzedCount
-        var scannedIDs = initialScannedIDs
 
         var newEntries: [DatabaseService.ScoreEntry] = []
         var qualityMap: [String: PhotoLibraryService.QualitySignals] = [:]
@@ -576,17 +672,18 @@ class ScanViewModel: ObservableObject {
 
         var nextPos = 0
         var inFlight = 0
-        var localVisibleCount = baseAnalyzedCount
         var localScoredCount = max(0, min(total, cached.count))
-        var lastPublishedAt = Date.distantPast
-        let publishInterval: TimeInterval = 3.0
+        var lastProgressPublishedAt = Date.distantPast
+        let progressPublishInterval: TimeInterval = 0.5
         var pendingSizeHydrationIndices: [Int] = []
 
         let scoringStageStartedAt = logStageStart("Scan.PhaseB.DeepScan.ScoringUncached")
         await withTaskGroup(of: (Int, PhotoLibraryService.ScoreResult).self) { group in
             func enqueueTasksIfNeeded() async {
                 // Keep UI responsive while users browse Timeline/Detail during deep scan.
-                let limit = await MainActor.run { self.isUserInteractingInDetail ? 2 : 4 }
+                // Lowered from 4/2 → 2/1: Vision + CIContext + PhotoKit XPC saturate
+                // the device when running 4-wide, causing scroll jank and heat.
+                let limit = await MainActor.run { self.isUserInteractingInDetail ? 1 : 2 }
                 while inFlight < limit && nextPos < uncached.count {
                     let i = uncached[nextPos]
                     let asset = raw[i].asset
@@ -609,9 +706,6 @@ class ScanViewModel: ObservableObject {
                     hasFaces: result.hasFaces
                 )
                 scored[idx].isUtility = result.isUtility
-                if scannedIDs.insert(raw[idx].id).inserted {
-                    localVisibleCount += 1
-                }
                 localScoredCount = min(total, localScoredCount + 1)
                 if scored[idx].fileSizeBytes == nil {
                     pendingSizeHydrationIndices.append(idx)
@@ -636,21 +730,16 @@ class ScanViewModel: ObservableObject {
                 )
 
                 let now = Date()
-                let reachedInterval = now.timeIntervalSince(lastPublishedAt) >= publishInterval
+                let reachedInterval = now.timeIntervalSince(lastProgressPublishedAt) >= progressPublishInterval
                 let finished = localScoredCount >= total
                 if reachedInterval || finished {
-                    analyzedCount = (phase == .done) ? localScoredCount : localVisibleCount
+                    analyzedCount = localScoredCount
                     backgroundProgress = 0.10 + (Double(localScoredCount) / Double(total)) * 0.45
                     progress = min(0.88, backgroundProgress)
-                    publishPartialResults(
-                        scoredAssets: scored,
-                        scannedIDs: scannedIDs,
-                        qualityMap: qualityMap,
-                        duplicateSeed: duplicateSeed,
-                        similarSeed: similarSeed,
-                        elapsedSeconds: Int(Date().timeIntervalSince(scanStart))
-                    )
-                    lastPublishedAt = now
+                    // During deep-scan scoring, publish only lightweight progress fields.
+                    // Rebuilding category arrays every tick causes broad UI invalidation and
+                    // can jank tab switching / scrolling while the scan runs in background.
+                    lastProgressPublishedAt = now
                 }
 
                 await enqueueTasksIfNeeded()
@@ -693,14 +782,6 @@ class ScanViewModel: ObservableObject {
         }
 
         let persistScoresStageStartedAt = logStageStart("Scan.PhaseB.DeepScan.SaveScoresAndScanState")
-        publishPartialResults(
-            scoredAssets: scored,
-            scannedIDs: scannedIDs,
-            qualityMap: qualityMap,
-            duplicateSeed: duplicateSeed,
-            similarSeed: similarSeed,
-            elapsedSeconds: Int(Date().timeIntervalSince(scanStart))
-        )
         await DatabaseService.shared.saveScores(newEntries)
         if !newAssetIDs.isEmpty {
             await DatabaseService.shared.markAssetsScanned(Array(newAssetIDs))
@@ -866,6 +947,7 @@ class ScanViewModel: ObservableObject {
         phase = .done
         isBackgroundAnalyzing = false
         phaseLabel = L10n.scanComplete
+        startImagePreheating(assets: scored)
         startBackgroundFileSizeHydration()
         logStageEnd("Scan.PhaseB.DeepScan.FinalizeUI", startedAt: finalizeStageStartedAt)
     }
@@ -1012,6 +1094,7 @@ class ScanViewModel: ObservableObject {
         favorites = mergeFileSizes(into: favorites, from: newFavorites)
         allAssets = mergeFileSizes(into: allAssets, from: newAllAssets)
         buildSummary(assets: allAssets)
+        fileSizeVersion += 1
 
         // Persist hydrated file sizes so next app launch reads real values immediately.
         let merged = newVideos + newBehavior + newScreenshots + newTemporary + newLowQuality + newFavorites + newAllAssets
@@ -1124,7 +1207,7 @@ class ScanViewModel: ObservableObject {
         return ids
     }
 
-    private static func formatDuration(_ seconds: Int) -> String {
+    static func formatDuration(_ seconds: Int) -> String {
         let s = max(0, seconds)
         let h = s / 3600
         let m = (s % 3600) / 60
@@ -1157,6 +1240,13 @@ class ScanViewModel: ObservableObject {
         let pendingIndices = updated.indices.filter { !scanned.contains(updated[$0].id) }
         var cursor = 0
         let batchSize = 200
+        var didPreheatFirstReveal = false
+
+        if !scanned.isEmpty {
+            let revealAssets = updated.filter { scanned.contains($0.id) }
+            startFirstRevealImagePreheating(assets: revealAssets)
+            didPreheatFirstReveal = true
+        }
 
         while cursor < pendingIndices.count, Date() < deadline, !Task.isCancelled {
             let end = min(cursor + batchSize, pendingIndices.count)
@@ -1180,6 +1270,11 @@ class ScanViewModel: ObservableObject {
 
             analyzedCount = scanned.count
             progress = max(progress, min(0.55, Double(scanned.count) / Double(total) * 0.55))
+            if !didPreheatFirstReveal || cursor == 0 {
+                let revealAssets = updated.filter { scanned.contains($0.id) }
+                startFirstRevealImagePreheating(assets: revealAssets)
+                didPreheatFirstReveal = true
+            }
             cursor = end
         }
 
@@ -1286,6 +1381,67 @@ class ScanViewModel: ObservableObject {
         }
     }
 
+    private func restartBackgroundDeepAnalysisFromCurrentLibrary() {
+        guard backgroundAnalysisTask == nil else { return }
+        guard phase == .done else { return }
+
+        isBackgroundAnalyzing = true
+        backgroundLabel = L10n.bgDeepAnalysis
+        backgroundProgress = max(backgroundProgress, 0.02)
+
+        backgroundAnalysisTask = Task(priority: .utility) { [weak self] in
+            guard let self else { return }
+            defer {
+                Task { @MainActor [weak self] in
+                    self?.backgroundAnalysisTask = nil
+                }
+            }
+
+            let scanStart = Date()
+            let raw = await self.service.fetchAllAssets()
+            guard !Task.isCancelled, !raw.isEmpty else {
+                await MainActor.run {
+                    self.isBackgroundAnalyzing = false
+                    self.backgroundProgress = 0
+                    self.backgroundLabel = ""
+                }
+                return
+            }
+
+            let ids = raw.map(\.id)
+            let cached = await DatabaseService.shared.loadScores(for: ids)
+            let metadata = await DatabaseService.shared.loadMetadata(for: ids)
+            let activeScannedIDs = await DatabaseService.shared.loadActiveScannedIds(for: ids)
+            let newAssetIDs = Set(ids).subtracting(activeScannedIDs)
+
+            let scored = raw.map { item -> PhotoAsset in
+                var updated = item
+                if let cachedScore = cached[item.id] {
+                    updated.score = cachedScore.score
+                    updated.isSelected = LibraryViewModel.shouldAutoSelect(
+                        score: cachedScore.score,
+                        hasFaces: cachedScore.hasFaces
+                    )
+                    updated.isUtility = cachedScore.isUtility
+                    updated.fileSizeBytes = cachedScore.fileSizeBytes ?? metadata[item.id]?.fileSizeBytes
+                } else if let cachedMetadata = metadata[item.id] {
+                    updated.fileSizeBytes = cachedMetadata.fileSizeBytes
+                }
+                return updated
+            }
+
+            await self.performBackgroundDeepScan(
+                raw: raw,
+                initialScored: scored,
+                cached: cached,
+                initialScannedIDs: activeScannedIDs,
+                ids: ids,
+                newAssetIDs: newAssetIDs,
+                scanStart: scanStart
+            )
+        }
+    }
+
     private func performIncrementalLaunchSync() async {
         let incrementalTotalStageStartedAt = logStageStart("Scan.Incremental.Total")
         defer {
@@ -1344,6 +1500,7 @@ class ScanViewModel: ObservableObject {
             isBackgroundAnalyzing = true
             backgroundLabel = L10n.bgScoring
             backgroundProgress = 0.05
+            analyzedCount = scannedExistingIDs.count
             shouldResetBackgroundState = true
         }
 
@@ -1362,6 +1519,7 @@ class ScanViewModel: ObservableObject {
             newAssets[i].isUtility = result.isUtility
             resultsByID[newAssets[i].id] = result
             if startedFromDonePhase {
+                analyzedCount = scannedExistingIDs.count + i + 1
                 backgroundProgress = 0.05 + (Double(i + 1) / Double(max(newAssets.count, 1))) * 0.55
             }
         }
@@ -1372,6 +1530,7 @@ class ScanViewModel: ObservableObject {
         )
 
         if startedFromDonePhase {
+            analyzedCount = currentIDs.count
             backgroundLabel = L10n.bgSaving
             backgroundProgress = 0.75
         }

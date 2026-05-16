@@ -13,13 +13,222 @@ enum AppLanguage: String, CaseIterable, Identifiable {
 
 // MARK: - Localized strings
 enum L10n {
-    private static var isEn: Bool { AppLanguage.current == .en }
+    static var isEn: Bool { AppLanguage.current == .en }
 
     // MARK: Tabs
     static var tabAIClean: String { isEn ? "AI Clean" : "AI清理" }
+    static var tabClean: String { isEn ? "Clean" : "清理" }
     static var tabTimeline: String { isEn ? "Timeline" : "时间线" }
     static var tabTools: String { isEn ? "Tools" : "工具" }
     static var tabSettings: String { isEn ? "Settings" : "设置" }
+    static var tabMe: String { isEn ? "Me" : "我的" }
+    static var tabInsights: String { isEn ? "Insights" : "洞察" }
+
+    // MARK: Insights
+    static var insightsTitle: String { isEn ? "Insights" : "洞察" }
+    static func insightsSubtitle(_ monthLabel: String, _ count: Int) -> String {
+        isEn ? "\(monthLabel) · \(count) photos this month" : "\(monthLabel) · 本月你拍了 \(count.formatted()) 张"
+    }
+    static var insightsAnnualReportCTA: String { isEn ? "Annual" : "年报" }
+    static var insightsPersonaEyebrow: String { isEn ? "Album Persona" : "相册人格" }
+    static var insightsAIGenerated: String { isEn ? "AI Generated" : "AI 生成" }
+    static func viewAnnualReport(_ year: Int) -> String {
+        isEn ? "View your \(year) report" : "查看你的 \(year) 报告"
+    }
+    static func viewAnnualReportSub(_ count: Int) -> String {
+        isEn ? "\(count.formatted()) photos · 12 months" : "\(count.formatted()) 张照片 · 12 个月"
+    }
+    static var insightsSectionBehavior: String { isEn ? "Shooting behavior" : "拍摄行为" }
+    static var insightsSectionBehaviorTitle: String { isEn ? "Your rhythm" : "你拍照的节奏" }
+    static var insightsSectionClean: String { isEn ? "Cleanup advice" : "整理建议" }
+    static var insightsSectionCleanTitle: String { isEn ? "Let's lighten up" : "让相册轻一点" }
+    static var insightsTrendTitle: String { isEn ? "Shooting trend" : "拍摄趋势" }
+    static func insightsTrendSub(_ days: Int, _ count: Int) -> String {
+        isEn ? "Last \(days) days · \(count) photos" : "过去 \(days) 天 · \(count) 张"
+    }
+    static var insightsTrendTab7d: String { isEn ? "7d" : "7天" }
+    static var insightsTrendTabHour: String { isEn ? "Hour" : "时段" }
+    static var insightsTrendMost: String { isEn ? "Most on weekends" : "周六拍得最多" }
+    static func insightsTrendDelta(_ pct: Int) -> String {
+        isEn ? "+\(pct)% vs last week" : "较上周 +\(pct)%"
+    }
+    static func insightsPeakHourInsight(_ hour: Int, _ pct: Int) -> String {
+        isEn ? "\(hour):00 is your peak — \(pct)% of daily shots." : "晚 \(hour) 点 是你的高峰时刻，占到全天拍照的 \(pct)%。"
+    }
+    static var insightsMixTitle: String { isEn ? "What you shot" : "你拍了什么" }
+    static var insightsMixSub: String { isEn ? "Content mix this month" : "本月内容分布" }
+    static var insightsScreenshotTitle: String { isEn ? "Where screenshots come from" : "截图来自哪里" }
+    static var insightsScreenshotBadge: String { isEn ? "Waste alert" : "浪费警报" }
+    static func insightsScreenshotSub(_ total: Int, _ pct: Int) -> String {
+        isEn ? "\(total) screenshots · \(pct)% never revisited" : "本月 \(total) 张截图 · 其中 \(pct)% 从未回看"
+    }
+    static var insightsReleaseLabel: String { isEn ? "Freeable space" : "可释放空间" }
+    static var insightsReleaseUsed: String { isEn ? "Used / Total" : "已用 / 总" }
+    static var insightsLibrarySize: String { isEn ? "Library size" : "相册占用" }
+    static func insightsReleaseCTA(_ size: String) -> String {
+        isEn ? "Clean now · Free \(size)" : "一键清理 · 释放 \(size)"
+    }
+    static var insightsAIBadge: String { isEn ? "AI Suggestion" : "AI 建议" }
+    static func insightsAISuggestion(_ count: Int, _ size: String) -> String {
+        isEn ? "\(count) temporary screenshots haven't been opened for 30+ days. Clean them to free ~\(size)." : "你有 \(count) 张「临时截图」已超过 30 天没打开。清理后可释放约 \(size)。"
+    }
+    static var insightsAIActionNow: String { isEn ? "Handle now" : "立即处理" }
+    static var insightsAIActionLater: String { isEn ? "Later" : "稍后" }
+    static var insightsLocalOnly: String { isEn ? "Computed on-device · no photos uploaded" : "仅在本机计算 · 不上传任何照片" }
+
+    // MARK: Insight — personas
+    static var personaNightOwl: String { isEn ? "The Night Recorder" : "夜晚的记录者" }
+    static var personaNightOwlChip: String { isEn ? "Night Owl" : "夜晚记录者" }
+    static var personaNightOwlLine: String {
+        isEn ? "You shoot most often late at night — many of your stories happen before sleep."
+             : "这一个月，你最常在深夜按下快门 — 很多故事都发生在睡前。"
+    }
+    static var personaFoodie: String { isEn ? "Table Photographer" : "餐桌上的摄影师" }
+    static var personaFoodieChip: String { isEn ? "Foodie" : "食光收集者" }
+    static var personaFoodieLine: String {
+        isEn ? "Every meal earns a snap — the table is your favorite viewfinder."
+             : "每一顿饭，你都记得按下快门 — 餐桌是你最爱的取景框。"
+    }
+    static var personaParent: String { isEn ? "Chief Baby Photographer" : "把宝宝的每一天都装进相册" }
+    static var personaParentChip: String { isEn ? "Baby Observer" : "宝宝观察员" }
+    static var personaParentLine: String {
+        isEn ? "First roll-over, first word — your lens never misses a moment."
+             : "第一次翻身、第一次叫妈妈 — 你的镜头一刻也没有错过。"
+    }
+    static var personaWanderer: String { isEn ? "Weekend Wanderer" : "把周末走出一张照片地图" }
+    static var personaWandererChip: String { isEn ? "Wanderer" : "周末漫游者" }
+    static var personaWandererLine: String {
+        isEn ? "Weekdays quiet, weekends alive — your lens has measured many places."
+             : "工作日安静，周末出发 — 你用镜头丈量了很多地方。"
+    }
+    static var personaHoarder: String { isEn ? "Every inspiration kept" : "每条灵感都想留下来" }
+    static var personaHoarderChip: String { isEn ? "Inspiration Hoarder" : "灵感囤积者" }
+    static var personaHoarderLine: String {
+        isEn ? "You screenshot everything you like — though you rarely open them again."
+             : "看到喜欢的东西就截一张 — 只是后来很少再打开它们。"
+    }
+    static var personaMinimalist: String { isEn ? "Each shot intentional" : "镜头用得少，但每张都认真" }
+    static var personaMinimalistChip: String { isEn ? "Minimalist" : "克制派" }
+    static var personaMinimalistLine: String {
+        isEn ? "You don't over-shoot — you press only when the moment is worth keeping."
+             : "不贪多 — 你只在真正想记住的时刻，才会按下快门。"
+    }
+
+    // Persona tag names
+    static var tagNightActive: String { isEn ? "Night active" : "夜间活跃" }
+    static var tagScreenshotPro: String { isEn ? "Screenshot pro" : "截图高手" }
+    static var tagDinnerDiary: String { isEn ? "Dinner diary" : "晚餐记录派" }
+    static var tagWeekendTrip: String { isEn ? "Weekend trips" : "周末出游" }
+    static var tagPortraitFan: String { isEn ? "Portrait fan" : "人像派" }
+    static var tagDailyLog: String { isEn ? "Daily log" : "日常记录" }
+    static var tagGrowthBook: String { isEn ? "Growth archive" : "成长档案" }
+    static var tagFamilyChat: String { isEn ? "Family chat star" : "家庭群高产" }
+    static var tagScenery: String { isEn ? "Scenery" : "风景派" }
+    static var tagCityWalk: String { isEn ? "City walker" : "城市漫步" }
+    static var tagCheckin: String { isEn ? "Check-in" : "打卡达人" }
+    static var tagDriving: String { isEn ? "Driving" : "开车族" }
+    static var tagWeChatClip: String { isEn ? "WeChat clippings" : "微信剪报" }
+    static var tagRedNote: String { isEn ? "Rednote picks" : "小红书种草" }
+    static var tagLongShot: String { isEn ? "Long screenshot" : "Safari 长截图" }
+    static var tagAddressArchive: String { isEn ? "Address archive" : "地址存档" }
+    static var tagLowProd: String { isEn ? "Low volume" : "低产" }
+    static var tagCurated: String { isEn ? "Curated" : "精选派" }
+    static var tagRareScreenshot: String { isEn ? "Rare screenshots" : "很少截图" }
+    static var tagMorningRitual: String { isEn ? "Morning ritual" : "餐前仪式" }
+    static var tagTopDownShooter: String { isEn ? "Top-down shooter" : "俯拍派" }
+    static var tagHotpotSeason: String { isEn ? "Hotpot season" : "火锅季" }
+    static var tagDessertLover: String { isEn ? "Dessert lover" : "甜品爱好者" }
+
+    // Stat labels
+    static var insightsStatPhotos: String { isEn ? "Photos" : "本月照片" }
+    static var insightsStatVsLast: String { isEn ? "vs last" : "环比上月" }
+    static var insightsStatPeak: String { isEn ? "Peak hour" : "快门高峰" }
+
+    // MARK: Annual report
+    static var annualEyebrow: String { isEn ? "Your album year" : "你的 · 相册年度" }
+    static var annualCoverTitle: String { isEn ? "Panorama" : "全景" }
+    static func annualCoverBody(_ count: Int) -> String {
+        isEn ? "You took \(count.formatted()) photos this year. Let's look back." : "这一年，你拍了 \(count.formatted()) 张照片。一起来看看故事。"
+    }
+    static var annualSwipeRight: String { isEn ? "Swipe right →" : "向右滑动 →" }
+    static var annualTotalLeading: String { isEn ? "This year, in total" : "这一年你共拍了" }
+    static func annualTotalTrailing(_ sizeGB: Int) -> String {
+        isEn ? "photos · \(sizeGB) GB" : "张照片 · 共 \(sizeGB) GB"
+    }
+    static func annualTopMonth(_ monthLabel: String, _ count: Int) -> String {
+        isEn ? "\(monthLabel) was your biggest month · \(count.formatted()) photos" : "\(monthLabel)是你拍照最多的月份 · \(count.formatted()) 张"
+    }
+    static var annualTimeLeading: String { isEn ? "The hour you love most" : "你最爱按快门的时刻" }
+    static var annualTimeBody: String { isEn ? "late nights, lamp light, before sleep" : "深夜、台灯、睡前的那一刻" }
+    static var annualContentLeading: String { isEn ? "What you photographed most" : "你最爱拍什么" }
+    static var annualPersonLeading: String { isEn ? "The person most in your album" : "相册里出现最多的人是" }
+    static var annualPersonLabel: String { isEn ? "Baby" : "宝宝" }
+    static func annualPersonBody(_ count: Int, _ pct: Int) -> String {
+        isEn ? "\(count.formatted()) photos · \(pct)% of portraits" : "\(count.formatted()) 张照片 · 占人像 \(pct)%"
+    }
+    static var annualPersonLine: String {
+        isEn ? "From first roll-over to first word — your lens never missed a moment." : "从第一次翻身，到第一次叫妈妈 — 你的镜头没有错过任何一刻。"
+    }
+    static var annualWasteLeading: String { isEn ? "But you also screenshot a lot" : "但其实，你也拍了很多截图" }
+    static func annualWasteBody(_ total: Int, _ pct: Int) -> String {
+        isEn ? "screenshots · \(pct)% of all photos" : "张截图，占全年照片 \(pct)%"
+    }
+    static var annualWasteRevisited: String { isEn ? "Actually revisited" : "但你真正回看的" }
+    static var annualWasteMostForgotten: String { isEn ? "· most forgotten" : "· 大部分被遗忘" }
+    static var annualWasteCta: String { isEn ? "Maybe it's time to lighten up." : "也许，是时候让相册轻一点。" }
+    static func annualPersonaEyebrow(_ year: Int) -> String {
+        isEn ? "Your \(year) persona" : "你的 \(year) 人格"
+    }
+    static func annualPersonaLabel(_ year: Int) -> String {
+        isEn ? "\(year) · " : "\(year) · "
+    }
+    static var annualEndingWish: String {
+        isEn ? "This year,<br/>you wrote your story in photos." : "这一年，<br/>你用相册写下了自己的故事。"
+    }
+    static var annualBtnSaveImage: String { isEn ? "Save as image" : "保存为图片" }
+    static var annualBtnShare: String { isEn ? "Share" : "分享" }
+    static var annualSwitcherHint: String {
+        isEn ? "Switch persona to see a different ending" : "切换不同人格，看看会是什么结局"
+    }
+    static var annualClose: String { isEn ? "Close" : "关闭" }
+
+    // Persona ending lines (line1 / line2)
+    static var personaEndNightOwlL1: String {
+        isEn ? "Once the day quiets, your lens starts working." : "白日喧闹过去，你的镜头才开始工作。"
+    }
+    static var personaEndNightOwlL2: String {
+        isEn ? "May next year still have stories<br/>worth a late-night shutter." : "愿你的下一年，<br/>夜里依然有故事值得按快门。"
+    }
+    static var personaEndFoodieL1: String {
+        isEn ? "Every meal — you remember to keep one frame." : "每一顿饭，你都记得留下一张。"
+    }
+    static var personaEndFoodieL2: String {
+        isEn ? "May every meal in the year ahead<br/>still be worth remembering." : "愿你的下一年，<br/>每一顿饭，都值得记下来。"
+    }
+    static var personaEndParentL1: String {
+        isEn ? "From first roll-over, to first word — captured." : "从第一次翻身，到第一次叫妈妈。"
+    }
+    static var personaEndParentL2: String {
+        isEn ? "May you keep catching<br/>every small moment." : "愿你的下一年，<br/>依然不错过每一个小小的瞬间。"
+    }
+    static var personaEndWandererL1: String {
+        isEn ? "Weekdays quiet, weekends you set out with your camera." : "工作日安静，周末你带着镜头出发。"
+    }
+    static var personaEndWandererL2: String {
+        isEn ? "May new places still call your shutter<br/>in the year ahead." : "愿你的下一年，<br/>仍有新的地方，值得你按下快门。"
+    }
+    static var personaEndHoarderL1: String {
+        isEn ? "You never miss a screenshot of what moves you." : "看到心动的东西，你从不吝啬按下截图。"
+    }
+    static var personaEndHoarderL2: String {
+        isEn ? "May more of the inspiration you hoard<br/>actually be used." : "愿你的下一年，<br/>囤下的灵感，有更多真的被用上。"
+    }
+    static var personaEndMinimalistL1: String {
+        isEn ? "You press only for moments truly worth it." : "不贪多，你只在真正值得的时刻按下快门。"
+    }
+    static var personaEndMinimalistL2: String {
+        isEn ? "May every shot next year<br/>still be one you wanted to keep." : "愿你的下一年，<br/>每一张，都还是你真正想留下的。"
+    }
 
     // MARK: Common
     static var back: String { isEn ? "Back" : "返回" }

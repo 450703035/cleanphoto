@@ -18,7 +18,22 @@
       "Bash(git add *)",
       "Bash(git commit *)",
       "Bash(xcodebuild -project PhotoCleaner.xcodeproj -scheme PhotoCleaner -destination 'generic/platform=iOS Simulator' -quiet build)",
-      "Bash(xcodebuild -project PhotoCleaner.xcodeproj -scheme PhotoCleaner -destination 'generic/platform=iOS Simulator' -configuration Debug build)"
+      "Bash(xcodebuild -project PhotoCleaner.xcodeproj -scheme PhotoCleaner -destination 'generic/platform=iOS Simulator' -configuration Debug build)",
+      "WebFetch(domain:api.anthropic.com)",
+      "Bash(curl -sL \"https://api.anthropic.com/v1/design/h/aYhjkJYUzoOTO8JX8Cdvpw?open_file=index.html\" -o /tmp/design_index.html)",
+      "Read(//tmp/**)",
+      "Bash(curl -sIL \"https://api.anthropic.com/v1/design/h/aYhjkJYUzoOTO8JX8Cdvpw?open_file=index.html\")",
+      "Bash(curl -sL -X POST \"https://api.anthropic.com/v1/design/h/aYhjkJYUzoOTO8JX8Cdvpw?open_file=index.html\")",
+      "Bash(curl -sL -H \"Accept: application/json\" \"https://api.anthropic.com/v1/design/h/aYhjkJYUzoOTO8JX8Cdvpw/files\")",
+      "Bash(curl -sL -H \"Accept: text/html\" -H \"User-Agent: Mozilla/5.0\" \"https://api.anthropic.com/v1/design/h/aYhjkJYUzoOTO8JX8Cdvpw?open_file=README.md\")",
+      "Bash(curl -sIL -H \"Accept: text/html\" \"https://api.anthropic.com/v1/design/h/aYhjkJYUzoOTO8JX8Cdvpw\")",
+      "Bash(curl -sL -H \"Accept: */*\" -H \"X-Api-Key: dummy\" \"https://api.anthropic.com/v1/design/h/aYhjkJYUzoOTO8JX8Cdvpw?open_file=index.html\" -w \"\\\\n---STATUS:%{http_code}\\\\n\")",
+      "Bash(env)",
+      "Bash(grep -i -E \"readme|\\\\.md$|\\\\.txt$\")",
+      "Bash(find /Users/danny/PhotoCleaner -name \"*.swift\" -type f -exec grep -l \"struct PhotoThumbnail\" {} \\\\;)",
+      "Bash(find /Users/danny/PhotoCleaner -name \"*.swift\" -type f -exec grep -l \"AlbumFolderCell\\\\|struct.*FolderCell\" {} \\\\;)",
+      "Bash(claude plugin *)",
+      "Bash(claude *)"
     ]
   }
 }

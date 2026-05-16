@@ -14,7 +14,7 @@ struct HomeView: View {
                 } else {
                     switch vm.phase {
                     case .idle:    ScanIdleView(onStart: vm.startScan)
-                    case .scanning: ScanningView(vm: vm)
+                    case .scanning: ScanningView(vm: vm, progress: vm.progressVM)
                     case .done:    ResultDashboard(vm: vm, navPath: $navPath)
                     }
                 }
@@ -136,13 +136,14 @@ struct ScanIdleView: View {
 // MARK: - Scanning animation
 struct ScanningView: View {
     @ObservedObject var vm: ScanViewModel
+    @ObservedObject var progress: ScanProgressViewModel
     var showsCancel: Bool = true
 
     var body: some View {
         VStack(spacing: 0) {
             Spacer()
             Text(L10n.aiClean).font(AppTypography.hero).foregroundColor(AppColors.textPrimary)
-            Text(vm.phaseLabel).font(AppTypography.caption).foregroundColor(AppColors.lightPurple).padding(.top, 4)
+            Text(progress.phaseLabel).font(AppTypography.caption).foregroundColor(AppColors.lightPurple).padding(.top, 4)
             Spacer().frame(height: 32)
 
             PhotoSphereView(assets: Array(vm.allAssets.prefix(40).map { $0.asset }))
@@ -151,16 +152,16 @@ struct ScanningView: View {
             Spacer().frame(height: 20)
 
             VStack(spacing: 8) {
-                Text("\(Int(vm.progress * 100))%")
+                Text("\(Int(progress.progress * 100))%")
                     .font(.system(size: 21, weight: .semibold))
                     .foregroundColor(AppColors.textPrimary)
-                ProgressView(value: vm.progress)
+                ProgressView(value: progress.progress)
                     .tint(AppColors.purple)
                     .padding(.horizontal, 40)
-                Text(L10n.analyzedPhotos(vm.analyzedCount))
+                Text(L10n.analyzedPhotos(progress.analyzedCount))
                     .font(AppTypography.caption)
                     .foregroundColor(AppColors.textSecondary)
-                Text(L10n.elapsedTime(vm.scanElapsedText))
+                Text(L10n.elapsedTime(progress.scanElapsedText))
                     .font(AppTypography.caption)
                     .foregroundColor(AppColors.textSecondary)
             }
@@ -185,6 +186,35 @@ struct ScanningView: View {
 
             Spacer()
         }
+    }
+}
+
+// MARK: - Background analysis banner (observes progressVM directly so the
+// Home dashboard's main body is not re-evaluated every progress tick).
+struct BackgroundAnalysisBanner: View {
+    @ObservedObject var progress: ScanProgressViewModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(progress.backgroundLabel.isEmpty ? L10n.bgAnalyzing : progress.backgroundLabel)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(AppColors.purple)
+                Spacer()
+                Text("\(Int(progress.backgroundProgress * 100))%")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(AppColors.textSecondary)
+            }
+            ProgressView(value: progress.backgroundProgress)
+                .tint(AppColors.purple)
+        }
+        .padding(14)
+        .background(AppColors.cardBG)
+        .cornerRadius(16)
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(AppColors.separator, lineWidth: 0.5)
+        )
     }
 }
 
@@ -401,119 +431,351 @@ struct ResultDashboard: View {
     @ObservedObject var vm: ScanViewModel
     @Binding var navPath: [HomeRoute]
 
+    struct PrimaryCleanTask: Identifiable {
+        let route: HomeRoute
+        let title: String
+        let count: Int
+        let sizeBytes: Int64
+        let accent: Color
+        var id: HomeRoute { route }
+    }
+
+    struct SecondaryCleanTask: Identifiable {
+        let route: HomeRoute
+        let title: String
+        let subtitle: String
+        let count: Int
+        let sizeBytes: Int64
+        let icon: String
+        let tint: Color
+        var id: HomeRoute { route }
+    }
+
+    private var duplicateAndSimilarGroups: [PhotoGroup] {
+        vm.duplicateGroups + vm.similarGroups
+    }
+
+    private var duplicateAndSimilarCount: Int {
+        Set(duplicateAndSimilarGroups.flatMap { $0.assets.map(\.id) }).count
+    }
+
+    private var duplicateAndSimilarBytes: Int64 {
+        duplicateAndSimilarGroups
+            .flatMap { $0.assets.dropFirst() }
+            .reduce(0) { $0 + $1.sizeBytes }
+    }
+
+    private var liveConvertBytes: Int64 {
+        Int64(Double(vm.summary.livePhotoBytes) * 0.55)
+    }
+
+    private var releasePercent: Int {
+        guard vm.summary.totalBytes > 0 else { return 0 }
+        let ratio = Double(vm.summary.freeableBytes) / Double(vm.summary.totalBytes)
+        return Int((ratio * 100).rounded())
+    }
+
+    private var cleanSubtitle: String {
+        let freeable = ByteCountFormatter.string(fromByteCount: vm.summary.freeableBytes, countStyle: .file)
+        return L10n.isEn ? "Smart organize · Est. free \(freeable)" : "智能整理 · 预计可释放 \(freeable)"
+    }
+
+    private var videoFilesTitle: String {
+        L10n.isEn ? "Video Files" : "视频文件"
+    }
+
+    private var primaryTasks: [PrimaryCleanTask] {
+        [
+            .init(route: .duplicates, title: L10n.isEn ? "Duplicates & Similar" : "重复与相似", count: duplicateAndSimilarCount, sizeBytes: duplicateAndSimilarBytes, accent: Color(hex: "f5a452")),
+            .init(route: .screenshots, title: L10n.isEn ? "Screenshot Cleanup" : "截图清理", count: vm.screenshots.count, sizeBytes: vm.screenshots.reduce(0) { $0 + $1.sizeBytes }, accent: Color(hex: "63a4ff")),
+            .init(route: .temporaryRecords, title: L10n.isEn ? "Temporary Records" : "临时记录", count: vm.temporaryRecords.count, sizeBytes: vm.temporaryRecords.reduce(0) { $0 + $1.sizeBytes }, accent: Color(hex: "7f8cff")),
+            .init(route: .lowQuality, title: L10n.isEn ? "Low Quality" : "低质量", count: vm.lowQuality.count, sizeBytes: vm.lowQuality.reduce(0) { $0 + $1.sizeBytes }, accent: Color(hex: "72ce95")),
+            .init(route: .liveToStatic, title: L10n.isEn ? "Live to Still" : "Live转静态", count: vm.summary.livePhotoCount, sizeBytes: liveConvertBytes, accent: Color(hex: "ffb168")),
+            .init(route: .videos, title: videoFilesTitle, count: vm.videos.count, sizeBytes: vm.videos.reduce(0) { $0 + $1.sizeBytes }, accent: Color(hex: "ff8f8f")),
+        ]
+    }
+
+    private var secondaryTasks: [SecondaryCleanTask] {
+        [
+            .init(
+                route: .favorites,
+                title: L10n.isEn ? "Favorites" : "收藏",
+                subtitle: L10n.isEn ? "Default unselected to avoid accidental deletion" : "默认不选中，避免误删重要内容",
+                count: vm.favorites.count,
+                sizeBytes: vm.favorites.reduce(0) { $0 + $1.sizeBytes },
+                icon: "heart.fill",
+                tint: Color(lightHex: "fff4ee", darkHex: "2a201d")
+            ),
+            .init(
+                route: .behavior,
+                title: L10n.isEn ? "Other" : "其他",
+                subtitle: L10n.isEn ? "Cold photos and remaining items" : "冷门照片与其余内容",
+                count: vm.behaviorAssets.count,
+                sizeBytes: vm.behaviorAssets.reduce(0) { $0 + $1.sizeBytes },
+                icon: "snowflake",
+                tint: Color(lightHex: "f2f7ff", darkHex: "1f252e")
+            ),
+        ]
+    }
+
+    private func push(_ route: HomeRoute) {
+        navPath.append(route)
+    }
+
     var body: some View {
-        ScrollView {
-            VStack(spacing: 0) {
-                // Header
-                HStack {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(L10n.aiClean).font(.largeTitle).bold().foregroundColor(AppColors.textPrimary)
-                        Text(vm.isBackgroundAnalyzing
-                             ? L10n.bgAnalyzingElapsed(vm.scanElapsedText)
-                             : L10n.totalScanTime(vm.lastScanDurationText))
-                            .font(.caption)
-                            .foregroundColor(AppColors.textSecondary)
-                    }
-                    Spacer()
+        ScrollView(showsIndicators: false) {
+            VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(L10n.tabClean)
+                        .font(.system(size: 34, weight: .bold))
+                        .foregroundColor(AppColors.textPrimary)
+                    Text(cleanSubtitle)
+                        .font(.system(size: 14))
+                        .foregroundColor(AppColors.textSecondary)
                 }
-                .padding(.horizontal).padding(.top)
+                .padding(.horizontal, 16)
+                .padding(.top, 16)
 
-                // Health card
-                HealthCard(summary: vm.summary).padding(.horizontal).padding(.top, 10)
-
-                // Space bar
-                SpaceBar(summary: vm.summary).padding(.horizontal).padding(.top, 12)
+                CleanHeroCard(
+                    freeableBytes: vm.summary.freeableBytes,
+                    releasePercent: releasePercent
+                )
+                .padding(.horizontal, 16)
 
                 if vm.isBackgroundAnalyzing {
-                    VStack(alignment: .leading, spacing: 6) {
-                        HStack {
-                            Text(vm.backgroundLabel.isEmpty ? L10n.bgAnalyzing : vm.backgroundLabel)
-                                .font(.caption)
-                                .foregroundColor(AppColors.purple)
-                            Spacer()
-                            Text("\(Int(vm.backgroundProgress * 100))%")
-                                .font(.caption)
-                                .foregroundColor(AppColors.textSecondary)
+                    BackgroundAnalysisBanner(progress: vm.progressVM)
+                        .padding(.horizontal, 16)
+                }
+
+                CleanSectionHeader(eyebrow: L10n.isEn ? "Recommended" : "推荐动作", title: L10n.isEn ? "Priority Cleanup" : "优先清理")
+                    .padding(.horizontal, 16)
+
+                PriorityCleanCard(
+                    items: primaryTasks,
+                    onTap: push
+                )
+                .padding(.horizontal, 16)
+
+                CleanSectionHeader(eyebrow: L10n.isEn ? "More" : "补充分组", title: L10n.isEn ? "Favorites & Other" : "收藏与其他")
+                    .padding(.horizontal, 16)
+
+                VStack(spacing: 10) {
+                    ForEach(secondaryTasks) { item in
+                        SecondaryCleanCard(item: item) {
+                            push(item.route)
                         }
-                        ProgressView(value: vm.backgroundProgress)
-                            .tint(AppColors.purple)
-                    }
-                    .padding(.horizontal)
-                    .padding(.top, 10)
-                }
-
-                // Suggestions
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(L10n.smartSuggestions)
-                        .font(.caption).fontWeight(.semibold)
-                        .foregroundColor(AppColors.textSecondary)
-                        .textCase(.uppercase)
-                        .padding(.horizontal)
-                        .padding(.top, 12)
-
-                    let duplicateAndSimilarGroups = vm.duplicateGroups + vm.similarGroups
-                    let duplicateAndSimilarPhotoCount = Set(
-                        duplicateAndSimilarGroups.flatMap { $0.assets.map(\.id) }
-                    ).count
-
-                    SuggestionCard(icon: "arrow.triangle.2.circlepath", iconBg: AppColors.purple,
-                                   title: L10n.duplicateAndSimilar,
-                                   desc: L10n.dupDescPhotos(duplicateAndSimilarPhotoCount, duplicateAndSimilarGroups.count),
-                                   size: ByteCountFormatter.string(
-                                    fromByteCount: duplicateAndSimilarGroups
-                                        .flatMap { $0.assets.dropFirst() }
-                                        .reduce(0) { $0 + $1.sizeBytes },
-                                    countStyle: .file
-                                   )) {
-                        navPath.append(.duplicates)
-                    }
-                    SuggestionCard(icon: "camera.viewfinder", iconBg: AppColors.red,
-                                   title: L10n.screenshotClean,
-                                   desc: L10n.screenshotDesc(vm.screenshots.count),
-                                   size: ByteCountFormatter.string(fromByteCount: vm.screenshots.reduce(0){$0+$1.sizeBytes}, countStyle: .file)) {
-                        navPath.append(.screenshots)
-                    }
-                    SuggestionCard(icon: "doc.text.viewfinder", iconBg: AppColors.blue,
-                                   title: L10n.temporaryRecords,
-                                   desc: L10n.temporaryDesc(vm.temporaryRecords.count),
-                                   size: ByteCountFormatter.string(fromByteCount: vm.temporaryRecords.reduce(0){$0+$1.sizeBytes}, countStyle: .file)) {
-                        navPath.append(.temporaryRecords)
-                    }
-                    SuggestionCard(icon: "video.fill", iconBg: AppColors.amber,
-                                   title: L10n.largeVideos,
-                                   desc: L10n.videoDesc(vm.videos.count),
-                                   size: ByteCountFormatter.string(fromByteCount: vm.videos.reduce(0){$0+$1.sizeBytes}, countStyle: .file)) {
-                        navPath.append(.videos)
-                    }
-                    SuggestionCard(icon: "star.slash.fill", iconBg: AppColors.green,
-                                   title: L10n.lowQualityPhotos,
-                                   desc: L10n.lowQualityDesc(vm.lowQuality.count),
-                                   size: ByteCountFormatter.string(fromByteCount: vm.lowQuality.reduce(0){$0+$1.sizeBytes}, countStyle: .file)) {
-                        navPath.append(.lowQuality)
-                    }
-                    SuggestionCard(icon: "livephoto", iconBg: AppColors.amber,
-                                   title: L10n.liveToStatic,
-                                   desc: L10n.liveDesc(vm.summary.livePhotoCount),
-                                   size: ByteCountFormatter.string(fromByteCount: Int64(Double(vm.summary.livePhotoBytes) * 0.55), countStyle: .file)) {
-                        navPath.append(.liveToStatic)
-                    }
-                    SuggestionCard(icon: "heart.fill", iconBg: AppColors.red,
-                                   title: L10n.favoritePhotos,
-                                   desc: L10n.favoriteDesc(vm.favorites.count),
-                                   size: ByteCountFormatter.string(fromByteCount: vm.favorites.reduce(0){$0+$1.sizeBytes}, countStyle: .file)) {
-                        navPath.append(.favorites)
-                    }
-                    SuggestionCard(icon: "snowflake", iconBg: AppColors.amber,
-                                   title: L10n.otherBehavior,
-                                   desc: L10n.behaviorDesc(vm.behaviorAssets.count),
-                                   size: ByteCountFormatter.string(fromByteCount: vm.behaviorAssets.reduce(0){$0+$1.sizeBytes}, countStyle: .file)) {
-                        navPath.append(.behavior)
                     }
                 }
-                .padding(.bottom, 20)
+                .padding(.horizontal, 16)
+
+                Text(L10n.isEn ? "All analysis stays on device · You can undo cleanup anytime." : "所有分析均在本机完成 · 你可随时撤销清理")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(AppColors.textTertiary)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.top, 8)
+                    .padding(.bottom, 24)
             }
         }
         .background(AppColors.darkBG)
+    }
+}
+
+private struct CleanSectionHeader: View {
+    let eyebrow: String
+    let title: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(eyebrow)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundColor(AppColors.textTertiary)
+                .textCase(.uppercase)
+            Text(title)
+                .font(.system(size: 28, weight: .bold))
+                .foregroundColor(AppColors.textPrimary)
+        }
+    }
+}
+
+private struct CleanHeroCard: View {
+    let freeableBytes: Int64
+    let releasePercent: Int
+
+    private var freeableGB: String {
+        let gb = Double(freeableBytes) / 1_000_000_000
+        return gb >= 10 ? String(format: "%.0f", gb) : String(format: "%.1f", gb)
+    }
+
+    private var releaseCaption: String {
+        L10n.isEn ? "Estimated from duplicates, screenshots, temporary records and low quality photos." : "预计从重复图、截图、临时记录和低质量照片中释放空间。"
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(L10n.isEn ? "Smart Cleanup" : "智能清理建议")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundColor(Color.white.opacity(0.78))
+                .textCase(.uppercase)
+
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(freeableGB)
+                    .font(.system(size: 44, weight: .bold, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundColor(.white)
+                Text("GB")
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundColor(Color.white.opacity(0.9))
+            }
+
+            Text(releaseCaption)
+                .font(.system(size: 14, weight: .medium))
+                .foregroundColor(Color.white.opacity(0.84))
+
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule()
+                        .fill(Color.white.opacity(0.2))
+                    Capsule()
+                        .fill(Color.white)
+                        .frame(width: geo.size.width * CGFloat(max(0, min(100, releasePercent))) / 100.0)
+                }
+            }
+            .frame(height: 8)
+
+            Text(L10n.isEn ? "About \(max(releasePercent, 0))% of total device storage" : "占设备总容量约 \(max(releasePercent, 0))%")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundColor(Color.white.opacity(0.75))
+        }
+        .padding(18)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            LinearGradient(
+                colors: [Color(hex: "456cd6"), Color(hex: "3a52bf"), Color(hex: "2d3f97")],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        )
+        .cornerRadius(22)
+        .overlay(
+            Circle()
+                .fill(
+                    RadialGradient(
+                        colors: [Color(hex: "f4a34f").opacity(0.44), .clear],
+                        center: .center,
+                        startRadius: 0,
+                        endRadius: 120
+                    )
+                )
+                .frame(width: 170, height: 170)
+                .offset(x: 90, y: -90),
+            alignment: .topTrailing
+        )
+    }
+}
+
+private struct PriorityCleanCard: View {
+    let items: [ResultDashboard.PrimaryCleanTask]
+    let onTap: (HomeRoute) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text(L10n.isEn ? "High-yield tasks" : "高收益任务")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundColor(AppColors.textPrimary)
+                Spacer()
+                Text(L10n.isEn ? "Est. 4 mins" : "预计 4 分钟")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(AppColors.textTertiary)
+            }
+
+            VStack(spacing: 9) {
+                ForEach(Array(items.enumerated()), id: \.element.id) { idx, item in
+                    Button {
+                        onTap(item.route)
+                    } label: {
+                        HStack(spacing: 10) {
+                            RoundedRectangle(cornerRadius: 3)
+                                .fill(item.accent)
+                                .frame(width: 10, height: 10)
+
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(item.title)
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundColor(AppColors.textPrimary)
+                                Text("\(item.count) \(L10n.isEn ? "items" : "项") · \(ByteCountFormatter.string(fromByteCount: item.sizeBytes, countStyle: .file))")
+                                    .font(.system(size: 12))
+                                    .foregroundColor(AppColors.textSecondary)
+                            }
+
+                            Spacer(minLength: 8)
+
+                            Text(idx == 0 ? (L10n.isEn ? "Clean now" : "立即清理") : (L10n.isEn ? "View" : "查看"))
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundColor(idx == 0 ? Color(lightHex: "ffffff", darkHex: "0a0a0b") : AppColors.textSecondary)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 6)
+                                .background(idx == 0 ? AppColors.textPrimary : Color(lightHex: "000000", darkHex: "ffffff", lightAlpha: 0.08, darkAlpha: 0.14))
+                                .clipShape(Capsule())
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .padding(18)
+        .background(AppColors.cardBG)
+        .cornerRadius(20)
+        .overlay(
+            RoundedRectangle(cornerRadius: 20)
+                .stroke(AppColors.separator, lineWidth: 0.5)
+        )
+    }
+}
+
+private struct SecondaryCleanCard: View {
+    let item: ResultDashboard.SecondaryCleanTask
+    let onTap: () -> Void
+
+    var body: some View {
+        Button(action: onTap) {
+            HStack(spacing: 12) {
+                Image(systemName: item.icon)
+                    .font(.system(size: 16, weight: .semibold))
+                    .frame(width: 34, height: 34)
+                    .foregroundColor(AppColors.textPrimary)
+                    .background(Color(lightHex: "000000", darkHex: "ffffff", lightAlpha: 0.06, darkAlpha: 0.12))
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(item.title)
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundColor(AppColors.textPrimary)
+                    Text(item.subtitle)
+                        .font(.system(size: 12))
+                        .foregroundColor(AppColors.textSecondary)
+                        .lineLimit(1)
+                    Text("\(item.count) \(L10n.isEn ? "items" : "项") · \(ByteCountFormatter.string(fromByteCount: item.sizeBytes, countStyle: .file))")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(AppColors.textSecondary)
+                }
+
+                Spacer()
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(AppColors.textTertiary)
+            }
+            .padding(14)
+            .background(item.tint)
+            .cornerRadius(16)
+            .overlay(
+                RoundedRectangle(cornerRadius: 16)
+                    .stroke(AppColors.separator, lineWidth: 0.5)
+            )
+        }
+        .buttonStyle(.plain)
     }
 }
 
