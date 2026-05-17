@@ -690,14 +690,17 @@ enum L10n {
              : "截图分类、人脸保护\n给每张照片质量评分"
     }
 
-    // Onboarding — feature-page atoms (new)
-    static var onboardingFeature1Badge: String { isEn ? "−12 GB" : "−12 GB" }
-    static var onboardingFeature2Score: String { isEn ? "92" : "92" }
+    // Onboarding — feature-page atoms
+    static let onboardingFeature1Badge = "−12 GB"
+    static let onboardingFeature2Score = "92"
     static var onboardingFeature2CategoryTag: String { isEn ? "Portrait · Sharp" : "人像 · 清晰" }
 
-    // Onboarding — page 4 (scan) titles (new)
+    // Onboarding — page 4 (scan) titles
     static var onboardingScanTitle: String { isEn ? "Scan Your Library" : "开始扫描您的照片库" }
-    static var onboardingScanDesc: String { isEn ? "Takes about 20 seconds.\nResults appear as we go." : "大约需要 20 秒\n结果会陆续呈现" }
+    static var onboardingScanDesc: String {
+        isEn ? "Takes about 20 seconds.\nResults appear as we go."
+             : "大约需要 20 秒\n结果会陆续呈现"
+    }
 
     static var onboardingPhotoTitle: String { isEn ? "Access Your Photos" : "访问您的相册" }
     static var onboardingPhotoDesc: String {
