@@ -695,13 +695,6 @@ enum L10n {
     static let onboardingFeature2Score = "92"
     static var onboardingFeature2CategoryTag: String { isEn ? "Portrait · Sharp" : "人像 · 清晰" }
 
-    // Onboarding — page 4 (scan) titles
-    static var onboardingScanTitle: String { isEn ? "Scan Your Library" : "开始扫描您的照片库" }
-    static var onboardingScanDesc: String {
-        isEn ? "Takes about 20 seconds.\nResults appear as we go."
-             : "大约需要 20 秒\n结果会陆续呈现"
-    }
-
     static var onboardingPhotoTitle: String { isEn ? "Access Your Photos" : "访问您的相册" }
     static var onboardingPhotoDesc: String {
         isEn ? "PhotoCleaner needs access to your photo library to analyze and clean up. All processing is done on-device — nothing is uploaded."
