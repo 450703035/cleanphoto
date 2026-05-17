@@ -7,72 +7,74 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		A001 /* PhotoCleanerApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = F001 /* PhotoCleanerApp.swift */; };
-		A002 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F002 /* ContentView.swift */; };
-		A003 /* AppConstants.swift in Sources */ = {isa = PBXBuildFile; fileRef = F003 /* AppConstants.swift */; };
-		A004 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = F004 /* Models.swift */; };
-		A005 /* PhotoLibraryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F005 /* PhotoLibraryService.swift */; };
-		A006 /* ScanViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = F006 /* ScanViewModel.swift */; };
-		A007 /* LibraryViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = F007 /* LibraryViewModel.swift */; };
-		A008 /* SharedComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = F008 /* SharedComponents.swift */; };
-		A009 /* HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F009 /* HomeView.swift */; };
-		A010 /* CleanDetailViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = F010 /* CleanDetailViews.swift */; };
-		A011 /* TimelineView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F011 /* TimelineView.swift */; };
-		A012 /* ToolsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F012 /* ToolsView.swift */; };
-		A013 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F013 /* SettingsView.swift */; };
-		A014 /* DatabaseService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F014 /* DatabaseService.swift */; };
-		A015 /* PhotoStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F015 /* PhotoStore.swift */; };
-		A016 /* LivePhotoToolView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F016 /* LivePhotoToolView.swift */; };
-		A017 /* VideoCompressToolView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F017 /* VideoCompressToolView.swift */; };
-		A018 /* BlurDetectToolView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F018 /* BlurDetectToolView.swift */; };
-		A019 /* HeicConvertToolView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F019 /* HeicConvertToolView.swift */; };
-		A020 /* SmartAlbumToolView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F020 /* SmartAlbumToolView.swift */; };
-		A021 /* SwipeDeleteToolView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F021 /* SwipeDeleteToolView.swift */; };
-		A022 /* ToolSharedSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = F022 /* ToolSharedSupport.swift */; };
-		A023 /* L10n.swift in Sources */ = {isa = PBXBuildFile; fileRef = F023 /* L10n.swift */; };
-			A024 /* InsightsComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = F024 /* InsightsComponents.swift */; };
-			A025 /* InsightsModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = F025 /* InsightsModels.swift */; };
-			A026 /* AnnualReportView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F026 /* AnnualReportView.swift */; };
-		A027 /* ScreenshotSourceModelRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = F027 /* ScreenshotSourceModelRunner.swift */; };
-		A028 /* ScreenshotSourceClassifier.mlmodel in Resources */ = {isa = PBXBuildFile; fileRef = F028 /* ScreenshotSourceClassifier.mlmodel */; };
-			2011E0A28EDF4F65296BB37A /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F4316D49BC3101C62AC8D7E /* OnboardingView.swift */; };
+		2011E0A28EDF4F65296BB37A /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F4316D49BC3101C62AC8D7E /* OnboardingView.swift */; };
+		40544038A764CC26F6113C4F /* OnboardingComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4DB5425790EFBF679EA7DEF3 /* OnboardingComponents.swift */; };
+		'A001' = {isa = PBXBuildFile; fileRef = F001; };
+		'A002' = {isa = PBXBuildFile; fileRef = F002; };
+		'A003' = {isa = PBXBuildFile; fileRef = F003; };
+		'A004' = {isa = PBXBuildFile; fileRef = F004; };
+		'A005' = {isa = PBXBuildFile; fileRef = F005; };
+		'A006' = {isa = PBXBuildFile; fileRef = F006; };
+		'A007' = {isa = PBXBuildFile; fileRef = F007; };
+		'A008' = {isa = PBXBuildFile; fileRef = F008; };
+		'A009' = {isa = PBXBuildFile; fileRef = F009; };
+		'A010' = {isa = PBXBuildFile; fileRef = F010; };
+		'A011' = {isa = PBXBuildFile; fileRef = F011; };
+		'A012' = {isa = PBXBuildFile; fileRef = F012; };
+		'A013' = {isa = PBXBuildFile; fileRef = F013; };
+		'A014' = {isa = PBXBuildFile; fileRef = F014; };
+		'A015' = {isa = PBXBuildFile; fileRef = F015; };
+		'A016' = {isa = PBXBuildFile; fileRef = F016; };
+		'A017' = {isa = PBXBuildFile; fileRef = F017; };
+		'A018' = {isa = PBXBuildFile; fileRef = F018; };
+		'A019' = {isa = PBXBuildFile; fileRef = F019; };
+		'A020' = {isa = PBXBuildFile; fileRef = F020; };
+		'A021' = {isa = PBXBuildFile; fileRef = F021; };
+		'A022' = {isa = PBXBuildFile; fileRef = F022; };
+		'A023' = {isa = PBXBuildFile; fileRef = F023; };
+		'A024' = {isa = PBXBuildFile; fileRef = F024; };
+		'A025' = {isa = PBXBuildFile; fileRef = F025; };
+		'A026' = {isa = PBXBuildFile; fileRef = F026; };
+		'A027' = {isa = PBXBuildFile; fileRef = F027; };
+		'A028' = {isa = PBXBuildFile; fileRef = F028; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		F001 /* PhotoCleanerApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoCleanerApp.swift; sourceTree = "<group>"; };
-		F002 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
-		F003 /* AppConstants.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppConstants.swift; sourceTree = "<group>"; };
-		F004 /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
-		F005 /* PhotoLibraryService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoLibraryService.swift; sourceTree = "<group>"; };
-		F006 /* ScanViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanViewModel.swift; sourceTree = "<group>"; };
-		F007 /* LibraryViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryViewModel.swift; sourceTree = "<group>"; };
-		F008 /* SharedComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedComponents.swift; sourceTree = "<group>"; };
-		F009 /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
-		F010 /* CleanDetailViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CleanDetailViews.swift; sourceTree = "<group>"; };
-		F011 /* TimelineView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimelineView.swift; sourceTree = "<group>"; };
-		F012 /* ToolsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolsView.swift; sourceTree = "<group>"; };
-		F013 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
-		F014 /* DatabaseService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DatabaseService.swift; sourceTree = "<group>"; };
-		F015 /* PhotoStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoStore.swift; sourceTree = "<group>"; };
-		F016 /* LivePhotoToolView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LivePhotoToolView.swift; sourceTree = "<group>"; };
-		F017 /* VideoCompressToolView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VideoCompressToolView.swift; sourceTree = "<group>"; };
-		F018 /* BlurDetectToolView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BlurDetectToolView.swift; sourceTree = "<group>"; };
-		F019 /* HeicConvertToolView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HeicConvertToolView.swift; sourceTree = "<group>"; };
-		F020 /* SmartAlbumToolView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SmartAlbumToolView.swift; sourceTree = "<group>"; };
-		F021 /* SwipeDeleteToolView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwipeDeleteToolView.swift; sourceTree = "<group>"; };
-		F022 /* ToolSharedSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolSharedSupport.swift; sourceTree = "<group>"; };
-		F023 /* L10n.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = L10n.swift; sourceTree = "<group>"; };
-			F024 /* InsightsComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InsightsComponents.swift; sourceTree = "<group>"; };
-			F025 /* InsightsModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InsightsModels.swift; sourceTree = "<group>"; };
-			F026 /* AnnualReportView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnnualReportView.swift; sourceTree = "<group>"; };
-		F027 /* ScreenshotSourceModelRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenshotSourceModelRunner.swift; sourceTree = "<group>"; };
-		F028 /* ScreenshotSourceClassifier.mlmodel */ = {isa = PBXFileReference; lastKnownFileType = file.mlmodel; path = ScreenshotSourceClassifier.mlmodel; sourceTree = "<group>"; };
-			FAPP /* PhotoCleaner.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PhotoCleaner.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		4DB5425790EFBF679EA7DEF3 /* OnboardingComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = OnboardingComponents.swift; path = PhotoCleaner/Views/Onboarding/OnboardingComponents.swift; sourceTree = SOURCE_ROOT; };
 		7F4316D49BC3101C62AC8D7E /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
+		'F001' = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoCleanerApp.swift; sourceTree = "<group>"; };
+		'F002' = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		'F003' = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppConstants.swift; sourceTree = "<group>"; };
+		'F004' = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
+		'F005' = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoLibraryService.swift; sourceTree = "<group>"; };
+		'F006' = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanViewModel.swift; sourceTree = "<group>"; };
+		'F007' = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryViewModel.swift; sourceTree = "<group>"; };
+		'F008' = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedComponents.swift; sourceTree = "<group>"; };
+		'F009' = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
+		'F010' = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CleanDetailViews.swift; sourceTree = "<group>"; };
+		'F011' = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimelineView.swift; sourceTree = "<group>"; };
+		'F012' = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolsView.swift; sourceTree = "<group>"; };
+		'F013' = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		'F014' = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DatabaseService.swift; sourceTree = "<group>"; };
+		'F015' = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoStore.swift; sourceTree = "<group>"; };
+		'F016' = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LivePhotoToolView.swift; sourceTree = "<group>"; };
+		'F017' = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VideoCompressToolView.swift; sourceTree = "<group>"; };
+		'F018' = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BlurDetectToolView.swift; sourceTree = "<group>"; };
+		'F019' = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HeicConvertToolView.swift; sourceTree = "<group>"; };
+		'F020' = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SmartAlbumToolView.swift; sourceTree = "<group>"; };
+		'F021' = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwipeDeleteToolView.swift; sourceTree = "<group>"; };
+		'F022' = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolSharedSupport.swift; sourceTree = "<group>"; };
+		'F023' = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = L10n.swift; sourceTree = "<group>"; };
+		'F024' = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InsightsComponents.swift; sourceTree = "<group>"; };
+		'F025' = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InsightsModels.swift; sourceTree = "<group>"; };
+		'F026' = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnnualReportView.swift; sourceTree = "<group>"; };
+		'F027' = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenshotSourceModelRunner.swift; sourceTree = "<group>"; };
+		'F028' = {isa = PBXFileReference; lastKnownFileType = file.mlmodel; path = ScreenshotSourceClassifier.mlmodel; sourceTree = "<group>"; };
+		'FAPP' = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PhotoCleaner.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
-		PH_FWK /* Frameworks */ = {
+		'PH_FWK' = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -82,165 +84,166 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
-		GRP_APP /* App */ = {
-			isa = PBXGroup;
-			children = (
-				F001 /* PhotoCleanerApp.swift */,
-				F002 /* ContentView.swift */,
-				F003 /* AppConstants.swift */,
-				F023 /* L10n.swift */,
-			);
-			path = App;
-			sourceTree = "<group>";
-		};
-		GRP_HOME /* Home */ = {
-			isa = PBXGroup;
-			children = (
-				F009 /* HomeView.swift */,
-				F010 /* CleanDetailViews.swift */,
-			);
-			path = Home;
-			sourceTree = "<group>";
-		};
-			GRP_INSIGHTS /* Insights */ = {
-				isa = PBXGroup;
-				children = (
-					F024 /* InsightsComponents.swift */,
-					F025 /* InsightsModels.swift */,
-					F026 /* AnnualReportView.swift */,
-				);
-				path = Insights;
-				sourceTree = "<group>";
-			};
-		GRP_MODELS /* Models */ = {
-			isa = PBXGroup;
-			children = (
-				F004 /* Models.swift */,
-			);
-			path = Models;
-			sourceTree = "<group>";
-		};
-		GRP_PRODUCTS /* Products */ = {
-			isa = PBXGroup;
-			children = (
-				FAPP /* PhotoCleaner.app */,
-			);
-			name = Products;
-			sourceTree = "<group>";
-		};
-		GRP_ROOT /* PhotoCleaner */ = {
-			isa = PBXGroup;
-			children = (
-				GRP_APP /* App */,
-				GRP_MODELS /* Models */,
-				GRP_SERVICES /* Services */,
-				GRP_VMS /* ViewModels */,
-				GRP_VIEWS /* Views */,
-				GRP_RES /* Resources */,
-				GRP_PRODUCTS /* Products */,
-			);
-			path = PhotoCleaner;
-			sourceTree = "<group>";
-		};
-		GRP_RES /* Resources */ = {
-			isa = PBXGroup;
-			children = (
-				F028 /* ScreenshotSourceClassifier.mlmodel */,
-			);
-			path = Resources;
-			sourceTree = "<group>";
-		};
-		GRP_SERVICES /* Services */ = {
-			isa = PBXGroup;
-			children = (
-				F005 /* PhotoLibraryService.swift */,
-				F014 /* DatabaseService.swift */,
-				F015 /* PhotoStore.swift */,
-				F027 /* ScreenshotSourceModelRunner.swift */,
-			);
-			path = Services;
-			sourceTree = "<group>";
-		};
-		GRP_SETTINGS /* Settings */ = {
-			isa = PBXGroup;
-			children = (
-				F013 /* SettingsView.swift */,
-			);
-			path = Settings;
-			sourceTree = "<group>";
-		};
-		GRP_SHARED /* Shared */ = {
-			isa = PBXGroup;
-			children = (
-				F008 /* SharedComponents.swift */,
-			);
-			path = Shared;
-			sourceTree = "<group>";
-		};
-		GRP_TIMELINE /* Timeline */ = {
-			isa = PBXGroup;
-			children = (
-				F011 /* TimelineView.swift */,
-			);
-			path = Timeline;
-			sourceTree = "<group>";
-		};
-		GRP_TOOLS /* Tools */ = {
-			isa = PBXGroup;
-			children = (
-				F012 /* ToolsView.swift */,
-				F022 /* ToolSharedSupport.swift */,
-				F016 /* LivePhotoToolView.swift */,
-				F017 /* VideoCompressToolView.swift */,
-				F018 /* BlurDetectToolView.swift */,
-				F019 /* HeicConvertToolView.swift */,
-				F020 /* SmartAlbumToolView.swift */,
-				F021 /* SwipeDeleteToolView.swift */,
-			);
-			path = Tools;
-			sourceTree = "<group>";
-		};
-		GRP_VIEWS /* Views */ = {
-			isa = PBXGroup;
-			children = (
-				F3FD5E561A407B156CE148F7 /* Onboarding */,
-				GRP_SHARED /* Shared */,
-				GRP_HOME /* Home */,
-				GRP_INSIGHTS /* Insights */,
-				GRP_TIMELINE /* Timeline */,
-				GRP_TOOLS /* Tools */,
-				GRP_SETTINGS /* Settings */,
-			);
-			path = Views;
-			sourceTree = "<group>";
-		};
-		GRP_VMS /* ViewModels */ = {
-			isa = PBXGroup;
-			children = (
-				F006 /* ScanViewModel.swift */,
-				F007 /* LibraryViewModel.swift */,
-			);
-			path = ViewModels;
-			sourceTree = "<group>";
-		};
 		F3FD5E561A407B156CE148F7 /* Onboarding */ = {
 			isa = PBXGroup;
 			children = (
 				7F4316D49BC3101C62AC8D7E /* OnboardingView.swift */,
+				4DB5425790EFBF679EA7DEF3 /* OnboardingComponents.swift */,
 			);
 			path = Onboarding;
+			sourceTree = "<group>";
+		};
+		'GRP_APP' = {
+			isa = PBXGroup;
+			children = (
+				F001,
+				F002,
+				F003,
+				F023,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		'GRP_HOME' = {
+			isa = PBXGroup;
+			children = (
+				F009,
+				F010,
+			);
+			path = Home;
+			sourceTree = "<group>";
+		};
+		'GRP_INSIGHTS' = {
+			isa = PBXGroup;
+			children = (
+				F024,
+				F025,
+				F026,
+			);
+			path = Insights;
+			sourceTree = "<group>";
+		};
+		'GRP_MODELS' = {
+			isa = PBXGroup;
+			children = (
+				F004,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+		'GRP_PRODUCTS' = {
+			isa = PBXGroup;
+			children = (
+				FAPP,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		'GRP_RES' = {
+			isa = PBXGroup;
+			children = (
+				F028,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+		'GRP_ROOT' = {
+			isa = PBXGroup;
+			children = (
+				GRP_APP,
+				GRP_MODELS,
+				GRP_SERVICES,
+				GRP_VMS,
+				GRP_VIEWS,
+				GRP_RES,
+				GRP_PRODUCTS,
+			);
+			path = PhotoCleaner;
+			sourceTree = "<group>";
+		};
+		'GRP_SERVICES' = {
+			isa = PBXGroup;
+			children = (
+				F005,
+				F014,
+				F015,
+				F027,
+			);
+			path = Services;
+			sourceTree = "<group>";
+		};
+		'GRP_SETTINGS' = {
+			isa = PBXGroup;
+			children = (
+				F013,
+			);
+			path = Settings;
+			sourceTree = "<group>";
+		};
+		'GRP_SHARED' = {
+			isa = PBXGroup;
+			children = (
+				F008,
+			);
+			path = Shared;
+			sourceTree = "<group>";
+		};
+		'GRP_TIMELINE' = {
+			isa = PBXGroup;
+			children = (
+				F011,
+			);
+			path = Timeline;
+			sourceTree = "<group>";
+		};
+		'GRP_TOOLS' = {
+			isa = PBXGroup;
+			children = (
+				F012,
+				F022,
+				F016,
+				F017,
+				F018,
+				F019,
+				F020,
+				F021,
+			);
+			path = Tools;
+			sourceTree = "<group>";
+		};
+		'GRP_VIEWS' = {
+			isa = PBXGroup;
+			children = (
+				F3FD5E561A407B156CE148F7 /* Onboarding */,
+				GRP_SHARED,
+				GRP_HOME,
+				GRP_INSIGHTS,
+				GRP_TIMELINE,
+				GRP_TOOLS,
+				GRP_SETTINGS,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+		'GRP_VMS' = {
+			isa = PBXGroup;
+			children = (
+				F006,
+				F007,
+			);
+			path = ViewModels;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		TGT_MAIN /* PhotoCleaner */ = {
+		'TGT_MAIN' = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = XCB_MAIN /* Build configuration list for PBXNativeTarget "PhotoCleaner" */;
+			buildConfigurationList = XCB_MAIN;
 			buildPhases = (
-				PH_SRC /* Sources */,
-				PH_FWK /* Frameworks */,
-				PH_RES /* Resources */,
+				PH_SRC,
+				PH_FWK,
+				PH_RES,
 			);
 			buildRules = (
 			);
@@ -248,13 +251,13 @@
 			);
 			name = PhotoCleaner;
 			productName = PhotoCleaner;
-			productReference = FAPP /* PhotoCleaner.app */;
+			productReference = FAPP;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
-		PROJ_MAIN /* Project object */ = {
+		'PROJ_MAIN' = {
 			isa = PBXProject;
 			attributes = {
 				BuildIndependentTargetsInParallel = YES;
@@ -266,7 +269,7 @@
 					};
 				};
 			};
-			buildConfigurationList = XCB_PROJ /* Build configuration list for PBXProject "PhotoCleaner" */;
+			buildConfigurationList = XCB_PROJ;
 			compatibilityVersion = "Xcode 14.0";
 			developmentRegion = zh_CN;
 			hasScannedForEncodings = 0;
@@ -275,67 +278,68 @@
 				zh_CN,
 				Base,
 			);
-			mainGroup = GRP_ROOT /* PhotoCleaner */;
-			productRefGroup = GRP_PRODUCTS /* Products */;
+			mainGroup = GRP_ROOT;
+			productRefGroup = GRP_PRODUCTS;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				TGT_MAIN /* PhotoCleaner */,
+				TGT_MAIN,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
-		PH_RES /* Resources */ = {
+		'PH_RES' = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				A028 /* ScreenshotSourceClassifier.mlmodel in Resources */,
+				A028,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
-		PH_SRC /* Sources */ = {
+		'PH_SRC' = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
 				2011E0A28EDF4F65296BB37A /* OnboardingView.swift in Sources */,
-				A001 /* PhotoCleanerApp.swift in Sources */,
-				A002 /* ContentView.swift in Sources */,
-				A003 /* AppConstants.swift in Sources */,
-				A004 /* Models.swift in Sources */,
-				A005 /* PhotoLibraryService.swift in Sources */,
-				A006 /* ScanViewModel.swift in Sources */,
-				A007 /* LibraryViewModel.swift in Sources */,
-				A008 /* SharedComponents.swift in Sources */,
-				A009 /* HomeView.swift in Sources */,
-				A010 /* CleanDetailViews.swift in Sources */,
-				A011 /* TimelineView.swift in Sources */,
-				A012 /* ToolsView.swift in Sources */,
-				A013 /* SettingsView.swift in Sources */,
-				A014 /* DatabaseService.swift in Sources */,
-				A015 /* PhotoStore.swift in Sources */,
-				A027 /* ScreenshotSourceModelRunner.swift in Sources */,
-				A016 /* LivePhotoToolView.swift in Sources */,
-				A017 /* VideoCompressToolView.swift in Sources */,
-				A018 /* BlurDetectToolView.swift in Sources */,
-				A019 /* HeicConvertToolView.swift in Sources */,
-				A020 /* SmartAlbumToolView.swift in Sources */,
-				A021 /* SwipeDeleteToolView.swift in Sources */,
-				A022 /* ToolSharedSupport.swift in Sources */,
-					A023 /* L10n.swift in Sources */,
-					A024 /* InsightsComponents.swift in Sources */,
-					A025 /* InsightsModels.swift in Sources */,
-					A026 /* AnnualReportView.swift in Sources */,
-				);
+				A001,
+				A002,
+				A003,
+				A004,
+				A005,
+				A006,
+				A007,
+				A008,
+				A009,
+				A010,
+				A011,
+				A012,
+				A013,
+				A014,
+				A015,
+				A027,
+				A016,
+				A017,
+				A018,
+				A019,
+				A020,
+				A021,
+				A022,
+				A023,
+				A024,
+				A025,
+				A026,
+				40544038A764CC26F6113C4F /* OnboardingComponents.swift in Sources */,
+			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin XCBuildConfiguration section */
-		BC_PROJ_DBG /* Debug */ = {
+		'BC_PROJ_DBG' = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
@@ -387,7 +391,7 @@
 			};
 			name = Debug;
 		};
-		BC_PROJ_REL /* Release */ = {
+		'BC_PROJ_REL' = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
@@ -433,7 +437,7 @@
 			};
 			name = Release;
 		};
-		BC_TGT_DBG /* Debug */ = {
+		'BC_TGT_DBG' = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
@@ -460,7 +464,7 @@
 			};
 			name = Debug;
 		};
-		BC_TGT_REL /* Release */ = {
+		'BC_TGT_REL' = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
@@ -490,25 +494,25 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		XCB_MAIN /* Build configuration list for PBXNativeTarget "PhotoCleaner" */ = {
+		'XCB_MAIN' = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				BC_TGT_DBG /* Debug */,
-				BC_TGT_REL /* Release */,
+				BC_TGT_DBG,
+				BC_TGT_REL,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		XCB_PROJ /* Build configuration list for PBXProject "PhotoCleaner" */ = {
+		'XCB_PROJ' = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				BC_PROJ_DBG /* Debug */,
-				BC_PROJ_REL /* Release */,
+				BC_PROJ_DBG,
+				BC_PROJ_REL,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
 	};
-	rootObject = PROJ_MAIN /* Project object */;
+	rootObject = PROJ_MAIN;
 }
