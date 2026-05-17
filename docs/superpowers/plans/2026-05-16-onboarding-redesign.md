@@ -29,27 +29,11 @@ Splitting components / mocks / pages into three files keeps each unit under ~200
 
 ## Pre-flight
 
-- [ ] **Step P1: Ensure Xcode is the active developer directory**
+- [x] **Step P1: Confirm Xcode is reachable**
 
-The repo's `xcodebuild` runs from `/Applications/Xcode.app`. CommandLineTools alone won't build.
+The repo builds with Xcode 26.4 / iOS 26 SDK. To avoid touching `xcode-select` (sudo required), every `xcodebuild` invocation in this plan is prefixed with `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer`. Already verified working — `Xcode 26.4 (Build 17E192)`.
 
-Run:
-```bash
-sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
-xcodebuild -version
-```
-Expected: `Xcode 15.x` or newer.
-
-- [ ] **Step P2: Confirm baseline build is green**
-
-Run:
-```bash
-cd /Users/danny/PhotoCleaner/.claude/worktrees/pensive-wu-9bc8f7
-xcodebuild -project PhotoCleaner.xcodeproj -scheme PhotoCleaner -destination 'platform=iOS Simulator,name=iPhone 15' -configuration Debug build 2>&1 | tail -20
-```
-Expected: `** BUILD SUCCEEDED **`.
-
-If it fails for unrelated reasons (e.g. signing), use `CODE_SIGNING_ALLOWED=NO` for the rest of this plan.
+- [x] **Step P2: Baseline build green** — already verified `** BUILD SUCCEEDED **` against `iPhone 17` simulator with `CODE_SIGNING_ALLOWED=NO`.
 
 ---
 
@@ -150,7 +134,7 @@ done
 
 Run:
 ```bash
-xcodebuild -project PhotoCleaner.xcodeproj -scheme PhotoCleaner -destination 'platform=iOS Simulator,name=iPhone 15' -configuration Debug build 2>&1 | tail -5
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -project PhotoCleaner.xcodeproj -scheme PhotoCleaner -destination 'platform=iOS Simulator,name=iPhone 17' -configuration Debug CODE_SIGNING_ALLOWED=NO build 2>&1 | tail -5
 ```
 Expected: `** BUILD SUCCEEDED **`.
 
@@ -238,14 +222,14 @@ static var onboardingNotifDone
 - [ ] **Step 2.4: Verify build still passes**
 
 ```bash
-xcodebuild -project PhotoCleaner.xcodeproj -scheme PhotoCleaner -destination 'platform=iOS Simulator,name=iPhone 15' -configuration Debug build 2>&1 | tail -20
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -project PhotoCleaner.xcodeproj -scheme PhotoCleaner -destination 'platform=iOS Simulator,name=iPhone 17' -configuration Debug CODE_SIGNING_ALLOWED=NO build 2>&1 | tail -20
 ```
 Expected: build will likely **fail** because the old `OnboardingView.swift` still references the deleted keys (`onboardingScreenshotLabel`, `onboardingTagChat`, `onboardingNotifTitle`, etc.). This is expected — Task 6 rewrites `OnboardingView.swift` entirely, which will resolve those references.
 
 **To unblock subsequent build verification in Tasks 3–5,** comment out (don't delete) every line in `OnboardingView.swift` that references a removed key — search for `onboardingScreenshotLabel`, `onboardingScoreLabel`, `onboardingTagChat`, `onboardingTagOrder`, `onboardingTagCode`, `onboardingTagOther`, `onboardingNotifTitle`, `onboardingNotifDesc`, `onboardingNotifAction`, `onboardingNotifDone` and prefix each occurrence with `// `. Replace each commented `Text(...)` with `Text("")` so SwiftUI's view builders still type-check. Then re-run the build:
 
 ```bash
-xcodebuild -project PhotoCleaner.xcodeproj -scheme PhotoCleaner -destination 'platform=iOS Simulator,name=iPhone 15' -configuration Debug build 2>&1 | tail -10
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -project PhotoCleaner.xcodeproj -scheme PhotoCleaner -destination 'platform=iOS Simulator,name=iPhone 17' -configuration Debug CODE_SIGNING_ALLOWED=NO build 2>&1 | tail -10
 ```
 Expected: `** BUILD SUCCEEDED **`.
 
@@ -472,7 +456,7 @@ struct OnboardingBottomBar: View {
 - [ ] **Step 3.2: Verify build**
 
 ```bash
-xcodebuild -project PhotoCleaner.xcodeproj -scheme PhotoCleaner -destination 'platform=iOS Simulator,name=iPhone 15' -configuration Debug build 2>&1 | tail -5
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -project PhotoCleaner.xcodeproj -scheme PhotoCleaner -destination 'platform=iOS Simulator,name=iPhone 17' -configuration Debug CODE_SIGNING_ALLOWED=NO build 2>&1 | tail -5
 ```
 Expected: `** BUILD SUCCEEDED **`.
 
@@ -638,7 +622,7 @@ struct PhotoStackMock: View {
 - [ ] **Step 4.2: Verify build**
 
 ```bash
-xcodebuild -project PhotoCleaner.xcodeproj -scheme PhotoCleaner -destination 'platform=iOS Simulator,name=iPhone 15' -configuration Debug build 2>&1 | tail -5
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -project PhotoCleaner.xcodeproj -scheme PhotoCleaner -destination 'platform=iOS Simulator,name=iPhone 17' -configuration Debug CODE_SIGNING_ALLOWED=NO build 2>&1 | tail -5
 ```
 Expected: `** BUILD SUCCEEDED **`.
 
@@ -870,7 +854,7 @@ struct StartScanPage: View {
 The old `OnboardingView.swift` still defines its own `FeaturePage1`/`FeaturePage2`/`NotificationPage`/`PhotoAccessPage`/`StartScanPage` as `private struct`s — but our new names live in `OnboardingPages.swift` as top-level types. There's no name clash because the old ones are `private`. The build should still succeed at this point.
 
 ```bash
-xcodebuild -project PhotoCleaner.xcodeproj -scheme PhotoCleaner -destination 'platform=iOS Simulator,name=iPhone 15' -configuration Debug build 2>&1 | tail -5
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -project PhotoCleaner.xcodeproj -scheme PhotoCleaner -destination 'platform=iOS Simulator,name=iPhone 17' -configuration Debug CODE_SIGNING_ALLOWED=NO build 2>&1 | tail -5
 ```
 Expected: `** BUILD SUCCEEDED **`.
 
@@ -972,7 +956,7 @@ struct OnboardingView: View {
 - [ ] **Step 6.2: Verify build**
 
 ```bash
-xcodebuild -project PhotoCleaner.xcodeproj -scheme PhotoCleaner -destination 'platform=iOS Simulator,name=iPhone 15' -configuration Debug build 2>&1 | tail -20
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -project PhotoCleaner.xcodeproj -scheme PhotoCleaner -destination 'platform=iOS Simulator,name=iPhone 17' -configuration Debug CODE_SIGNING_ALLOWED=NO build 2>&1 | tail -20
 ```
 Expected: `** BUILD SUCCEEDED **`.
 
@@ -1006,7 +990,7 @@ xcrun simctl uninstall booted com.PhotoCleaner.app 2>/dev/null || true
 - [ ] **Step 7.2: Build & install Debug**
 
 ```bash
-xcodebuild -project PhotoCleaner.xcodeproj -scheme PhotoCleaner -destination 'platform=iOS Simulator,name=iPhone 15' -configuration Debug build 2>&1 | tail -5
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -project PhotoCleaner.xcodeproj -scheme PhotoCleaner -destination 'platform=iOS Simulator,name=iPhone 17' -configuration Debug CODE_SIGNING_ALLOWED=NO build 2>&1 | tail -5
 APP_PATH=$(find ~/Library/Developer/Xcode/DerivedData -name "PhotoCleaner.app" -path "*Debug-iphonesimulator*" 2>/dev/null | head -1)
 xcrun simctl install booted "$APP_PATH"
 xcrun simctl launch booted "$(plutil -extract CFBundleIdentifier raw "$APP_PATH/Info.plist")"
@@ -1102,7 +1086,7 @@ Expected: no output. Any output means leftover references — delete them.
 - [ ] **Step 8.2: Re-verify build**
 
 ```bash
-xcodebuild -project PhotoCleaner.xcodeproj -scheme PhotoCleaner -destination 'platform=iOS Simulator,name=iPhone 15' -configuration Debug build 2>&1 | tail -5
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -project PhotoCleaner.xcodeproj -scheme PhotoCleaner -destination 'platform=iOS Simulator,name=iPhone 17' -configuration Debug CODE_SIGNING_ALLOWED=NO build 2>&1 | tail -5
 ```
 Expected: `** BUILD SUCCEEDED **`.
 
