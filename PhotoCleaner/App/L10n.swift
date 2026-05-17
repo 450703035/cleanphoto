@@ -678,32 +678,26 @@ enum L10n {
     static var onboardingSkip: String { isEn ? "Skip" : "跳过" }
     static var onboardingStart: String { isEn ? "Get Started" : "开始使用" }
 
-    static var onboardingFeature1Title: String { isEn ? "Free Up Space Instantly" : "一键释放存储空间" }
+    static var onboardingFeature1Title: String { isEn ? "Free Up\nStorage Space" : "释放\n存储空间" }
     static var onboardingFeature1Desc: String {
-        isEn ? "Browse videos by size in a waterfall layout. Quickly find and delete large files eating up your storage."
-             : "瀑布流浏览视频文件，快速定位并删除占用空间最大的视频，立即释放宝贵存储。"
+        isEn ? "Find duplicate photos and large videos.\nClear gigabytes in one tap."
+             : "找出重复照片和大视频\n一键清理几个 GB"
     }
 
-    static var onboardingFeature2Title: String { isEn ? "Smart Photo Analysis" : "智能照片分析" }
+    static var onboardingFeature2Title: String { isEn ? "Smart Analysis\nof Every Photo" : "智能识别\n每张照片" }
     static var onboardingFeature2Desc: String {
-        isEn ? "Auto-classify screenshots by content, and score every photo's quality with AI — blurry, dark, or duplicate photos get flagged."
-             : "自动将截图按内容分类整理，AI 为每张照片智能打分——模糊、过暗、重复照片一目了然。"
+        isEn ? "Screenshot classification, face protection,\nand quality scoring."
+             : "截图分类、人脸保护\n给每张照片质量评分"
     }
 
-    static var onboardingScreenshotLabel: String { isEn ? "Screenshots" : "截图分类" }
-    static var onboardingScoreLabel: String { isEn ? "Quality Score" : "质量评分" }
-    static var onboardingTagChat: String { isEn ? "Chat" : "聊天" }
-    static var onboardingTagOrder: String { isEn ? "Order" : "订单" }
-    static var onboardingTagCode: String { isEn ? "Code" : "代码" }
-    static var onboardingTagOther: String { isEn ? "Other" : "其他" }
+    // Onboarding — feature-page atoms (new)
+    static var onboardingFeature1Badge: String { isEn ? "−12 GB" : "−12 GB" }
+    static var onboardingFeature2Score: String { isEn ? "92" : "92" }
+    static var onboardingFeature2CategoryTag: String { isEn ? "Portrait · Sharp" : "人像 · 清晰" }
 
-    static var onboardingNotifTitle: String { isEn ? "Stay in the Loop" : "开启通知" }
-    static var onboardingNotifDesc: String {
-        isEn ? "Get notified when cleanup scans finish and receive smart suggestions to keep your library tidy."
-             : "扫描完成时及时提醒，定期推送清理建议，让相册始终保持整洁。"
-    }
-    static var onboardingNotifAction: String { isEn ? "Enable Notifications" : "开启通知" }
-    static var onboardingNotifDone: String { isEn ? "Notifications Enabled" : "通知已开启" }
+    // Onboarding — page 4 (scan) titles (new)
+    static var onboardingScanTitle: String { isEn ? "Scan Your Library" : "开始扫描您的照片库" }
+    static var onboardingScanDesc: String { isEn ? "Takes about 20 seconds.\nResults appear as we go." : "大约需要 20 秒\n结果会陆续呈现" }
 
     static var onboardingPhotoTitle: String { isEn ? "Access Your Photos" : "访问您的相册" }
     static var onboardingPhotoDesc: String {

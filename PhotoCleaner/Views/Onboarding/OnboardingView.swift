@@ -192,7 +192,7 @@ private struct FeaturePage2: View {
                             Image(systemName: "rectangle.on.rectangle.angled")
                                 .font(.system(size: 26))
                                 .foregroundColor(AppColors.lightPurple)
-                            Text(L10n.onboardingScreenshotLabel)
+                            Text("")
                                 .font(.system(size: 11, weight: .medium))
                                 .foregroundColor(AppColors.textSecondary)
                         }
@@ -200,12 +200,12 @@ private struct FeaturePage2: View {
 
                     // Mini tags
                     HStack(spacing: 4) {
-                        miniTag(L10n.onboardingTagChat, "message.fill", .blue)
-                        miniTag(L10n.onboardingTagOrder, "bag.fill", .orange)
+                        miniTag("", "message.fill", .blue)
+                        miniTag("", "bag.fill", .orange)
                     }
                     HStack(spacing: 4) {
-                        miniTag(L10n.onboardingTagCode, "chevron.left.forwardslash.chevron.right", .green)
-                        miniTag(L10n.onboardingTagOther, "ellipsis", .gray)
+                        miniTag("", "chevron.left.forwardslash.chevron.right", .green)
+                        miniTag("", "ellipsis", .gray)
                     }
                 }
                 .padding(10)
@@ -225,7 +225,7 @@ private struct FeaturePage2: View {
                             Image(systemName: "star.circle.fill")
                                 .font(.system(size: 26))
                                 .foregroundColor(AppColors.green)
-                            Text(L10n.onboardingScoreLabel)
+                            Text("")
                                 .font(.system(size: 11, weight: .medium))
                                 .foregroundColor(AppColors.textSecondary)
                         }
@@ -356,12 +356,12 @@ private struct NotificationPage: View {
             Spacer().frame(height: 48)
 
             VStack(spacing: 14) {
-                Text(L10n.onboardingNotifTitle)
+                Text("")
                     .font(.system(size: 28, weight: .bold))
                     .foregroundColor(AppColors.textPrimary)
                     .multilineTextAlignment(.center)
 
-                Text(L10n.onboardingNotifDesc)
+                Text("")
                     .font(AppTypography.body)
                     .foregroundColor(AppColors.textSecondary)
                     .multilineTextAlignment(.center)
@@ -379,7 +379,7 @@ private struct NotificationPage: View {
                 } label: {
                     HStack {
                         Image(systemName: granted ? "checkmark.circle.fill" : "bell.fill")
-                        Text(granted ? L10n.onboardingNotifDone : L10n.onboardingNotifAction)
+                        Text(granted ? "" : "")
                     }
                     .frame(maxWidth: .infinity)
                 }
