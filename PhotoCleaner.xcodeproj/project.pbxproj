@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		2011E0A28EDF4F65296BB37A /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F4316D49BC3101C62AC8D7E /* OnboardingView.swift */; };
 		40544038A764CC26F6113C4F /* OnboardingComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4DB5425790EFBF679EA7DEF3 /* OnboardingComponents.swift */; };
+		634AF418AF1046D981C064DD /* OnboardingMocks.swift in Sources */ = {isa = PBXBuildFile; fileRef = D031FB4469D94701BA389487 /* OnboardingMocks.swift */; };
 		'A001' = {isa = PBXBuildFile; fileRef = F001; };
 		'A002' = {isa = PBXBuildFile; fileRef = F002; };
 		'A003' = {isa = PBXBuildFile; fileRef = F003; };
@@ -41,6 +42,7 @@
 
 /* Begin PBXFileReference section */
 		4DB5425790EFBF679EA7DEF3 /* OnboardingComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = OnboardingComponents.swift; path = PhotoCleaner/Views/Onboarding/OnboardingComponents.swift; sourceTree = SOURCE_ROOT; };
+		D031FB4469D94701BA389487 /* OnboardingMocks.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = OnboardingMocks.swift; path = PhotoCleaner/Views/Onboarding/OnboardingMocks.swift; sourceTree = SOURCE_ROOT; };
 		7F4316D49BC3101C62AC8D7E /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
 		'F001' = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoCleanerApp.swift; sourceTree = "<group>"; };
 		'F002' = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
@@ -89,6 +91,7 @@
 			children = (
 				7F4316D49BC3101C62AC8D7E /* OnboardingView.swift */,
 				4DB5425790EFBF679EA7DEF3 /* OnboardingComponents.swift */,
+				D031FB4469D94701BA389487 /* OnboardingMocks.swift */,
 			);
 			path = Onboarding;
 			sourceTree = "<group>";
@@ -333,6 +336,7 @@
 				A025,
 				A026,
 				40544038A764CC26F6113C4F /* OnboardingComponents.swift in Sources */,
+				634AF418AF1046D981C064DD /* OnboardingMocks.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
