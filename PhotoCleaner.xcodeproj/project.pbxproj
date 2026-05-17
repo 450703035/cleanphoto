@@ -8,6 +8,9 @@
 
 /* Begin PBXBuildFile section */
 		2011E0A28EDF4F65296BB37A /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F4316D49BC3101C62AC8D7E /* OnboardingView.swift */; };
+		40544038A764CC26F6113C4F /* OnboardingComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4DB5425790EFBF679EA7DEF3 /* OnboardingComponents.swift */; };
+		634AF418AF1046D981C064DD /* OnboardingMocks.swift in Sources */ = {isa = PBXBuildFile; fileRef = D031FB4469D94701BA389487 /* OnboardingMocks.swift */; };
+		A15B5240AEFF41BCA80AD975 /* OnboardingPages.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DFB7CAC6FCB4C59A23536C1 /* OnboardingPages.swift */; };
 		A001 /* PhotoCleanerApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = F001 /* PhotoCleanerApp.swift */; };
 		A002 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F002 /* ContentView.swift */; };
 		A003 /* AppConstants.swift in Sources */ = {isa = PBXBuildFile; fileRef = F003 /* AppConstants.swift */; };
@@ -42,6 +45,9 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		4DB5425790EFBF679EA7DEF3 /* OnboardingComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = OnboardingComponents.swift; path = PhotoCleaner/Views/Onboarding/OnboardingComponents.swift; sourceTree = SOURCE_ROOT; };
+		D031FB4469D94701BA389487 /* OnboardingMocks.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = OnboardingMocks.swift; path = PhotoCleaner/Views/Onboarding/OnboardingMocks.swift; sourceTree = SOURCE_ROOT; };
+		9DFB7CAC6FCB4C59A23536C1 /* OnboardingPages.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = OnboardingPages.swift; path = PhotoCleaner/Views/Onboarding/OnboardingPages.swift; sourceTree = SOURCE_ROOT; };
 		7F4316D49BC3101C62AC8D7E /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
 		F001 /* PhotoCleanerApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoCleanerApp.swift; sourceTree = "<group>"; };
 		F002 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
@@ -91,6 +97,9 @@
 		F3FD5E561A407B156CE148F7 /* Onboarding */ = {
 			isa = PBXGroup;
 			children = (
+				4DB5425790EFBF679EA7DEF3 /* OnboardingComponents.swift */,
+				D031FB4469D94701BA389487 /* OnboardingMocks.swift */,
+				9DFB7CAC6FCB4C59A23536C1 /* OnboardingPages.swift */,
 				7F4316D49BC3101C62AC8D7E /* OnboardingView.swift */,
 			);
 			path = Onboarding;
@@ -314,6 +323,9 @@
 			buildActionMask = 2147483647;
 			files = (
 				2011E0A28EDF4F65296BB37A /* OnboardingView.swift in Sources */,
+				40544038A764CC26F6113C4F /* OnboardingComponents.swift in Sources */,
+				634AF418AF1046D981C064DD /* OnboardingMocks.swift in Sources */,
+				A15B5240AEFF41BCA80AD975 /* OnboardingPages.swift in Sources */,
 				A001 /* PhotoCleanerApp.swift in Sources */,
 				A002 /* ContentView.swift in Sources */,
 				A003 /* AppConstants.swift in Sources */,
