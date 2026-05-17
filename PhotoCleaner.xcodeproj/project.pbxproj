@@ -10,7 +10,6 @@
 		2011E0A28EDF4F65296BB37A /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F4316D49BC3101C62AC8D7E /* OnboardingView.swift */; };
 		40544038A764CC26F6113C4F /* OnboardingComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4DB5425790EFBF679EA7DEF3 /* OnboardingComponents.swift */; };
 		634AF418AF1046D981C064DD /* OnboardingMocks.swift in Sources */ = {isa = PBXBuildFile; fileRef = D031FB4469D94701BA389487 /* OnboardingMocks.swift */; };
-		A15B5240AEFF41BCA80AD975 /* OnboardingPages.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DFB7CAC6FCB4C59A23536C1 /* OnboardingPages.swift */; };
 		A001 /* PhotoCleanerApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = F001 /* PhotoCleanerApp.swift */; };
 		A002 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F002 /* ContentView.swift */; };
 		A003 /* AppConstants.swift in Sources */ = {isa = PBXBuildFile; fileRef = F003 /* AppConstants.swift */; };
@@ -37,18 +36,19 @@
 		A024 /* InsightsComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = F024 /* InsightsComponents.swift */; };
 		A025 /* InsightsModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = F025 /* InsightsModels.swift */; };
 		A026 /* AnnualReportView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F026 /* AnnualReportView.swift */; };
-		A027 /* ScreenshotSourceModelRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = F027 /* ScreenshotSourceModelRunner.swift */; };
+		A027 /* 	.swift in Sources */ = {isa = PBXBuildFile; fileRef = F027 /* 	.swift */; };
 		A028 /* ScreenshotSourceClassifier.mlmodel in Resources */ = {isa = PBXBuildFile; fileRef = F028 /* ScreenshotSourceClassifier.mlmodel */; };
 		A029 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = F029 /* Assets.xcassets */; };
 		A030 /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = F030 /* LaunchScreen.storyboard */; };
 		A031 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = F031 /* PrivacyInfo.xcprivacy */; };
+		A15B5240AEFF41BCA80AD975 /* OnboardingPages.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DFB7CAC6FCB4C59A23536C1 /* OnboardingPages.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		4DB5425790EFBF679EA7DEF3 /* OnboardingComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = OnboardingComponents.swift; path = PhotoCleaner/Views/Onboarding/OnboardingComponents.swift; sourceTree = SOURCE_ROOT; };
-		D031FB4469D94701BA389487 /* OnboardingMocks.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = OnboardingMocks.swift; path = PhotoCleaner/Views/Onboarding/OnboardingMocks.swift; sourceTree = SOURCE_ROOT; };
-		9DFB7CAC6FCB4C59A23536C1 /* OnboardingPages.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = OnboardingPages.swift; path = PhotoCleaner/Views/Onboarding/OnboardingPages.swift; sourceTree = SOURCE_ROOT; };
 		7F4316D49BC3101C62AC8D7E /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
+		9DFB7CAC6FCB4C59A23536C1 /* OnboardingPages.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = OnboardingPages.swift; path = PhotoCleaner/Views/Onboarding/OnboardingPages.swift; sourceTree = SOURCE_ROOT; };
+		D031FB4469D94701BA389487 /* OnboardingMocks.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = OnboardingMocks.swift; path = PhotoCleaner/Views/Onboarding/OnboardingMocks.swift; sourceTree = SOURCE_ROOT; };
 		F001 /* PhotoCleanerApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoCleanerApp.swift; sourceTree = "<group>"; };
 		F002 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		F003 /* AppConstants.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppConstants.swift; sourceTree = "<group>"; };
@@ -75,7 +75,7 @@
 		F024 /* InsightsComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InsightsComponents.swift; sourceTree = "<group>"; };
 		F025 /* InsightsModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InsightsModels.swift; sourceTree = "<group>"; };
 		F026 /* AnnualReportView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnnualReportView.swift; sourceTree = "<group>"; };
-		F027 /* ScreenshotSourceModelRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenshotSourceModelRunner.swift; sourceTree = "<group>"; };
+		F027 /* 	.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "\t.swift"; sourceTree = "<group>"; };
 		F028 /* ScreenshotSourceClassifier.mlmodel */ = {isa = PBXFileReference; lastKnownFileType = file.mlmodel; path = ScreenshotSourceClassifier.mlmodel; sourceTree = "<group>"; };
 		F029 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		F030 /* LaunchScreen.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; path = LaunchScreen.storyboard; sourceTree = "<group>"; };
@@ -182,7 +182,7 @@
 				F005 /* PhotoLibraryService.swift */,
 				F014 /* DatabaseService.swift */,
 				F015 /* PhotoStore.swift */,
-				F027 /* ScreenshotSourceModelRunner.swift */,
+				F027 /* 	.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -341,7 +341,7 @@
 				A013 /* SettingsView.swift in Sources */,
 				A014 /* DatabaseService.swift in Sources */,
 				A015 /* PhotoStore.swift in Sources */,
-				A027 /* ScreenshotSourceModelRunner.swift in Sources */,
+				A027 /* 	.swift in Sources */,
 				A016 /* LivePhotoToolView.swift in Sources */,
 				A017 /* VideoCompressToolView.swift in Sources */,
 				A018 /* BlurDetectToolView.swift in Sources */,

@@ -199,7 +199,7 @@ struct SettingsView: View {
                         }
 
                         // Version
-                        Text("PhotoCleaner v1.0.0")
+                        Text(L10n.isEn ? "Lighten v1.0.0" : "轻相册 v1.0.0")
                             .font(.caption).foregroundColor(AppColors.textTertiary)
                             .padding(.top, 24).padding(.bottom, 16)
                     }
@@ -232,7 +232,7 @@ struct SettingsView: View {
     }
 
     private func sendFeedback() {
-        let subject = "PhotoCleaner Feedback"
+        let subject = "Lighten Feedback"
         let encodedSubject = subject.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? subject
         guard let url = URL(string: "mailto:danny.wangle@gmail.com?subject=\(encodedSubject)") else { return }
         UIApplication.shared.open(url)

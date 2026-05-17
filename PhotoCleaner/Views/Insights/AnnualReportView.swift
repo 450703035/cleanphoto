@@ -623,7 +623,7 @@ private struct AnnualEndingShareCard: View {
 
                 Spacer()
 
-                Text("PhotoCleaner")
+                Text(L10n.isEn ? "Lighten" : "轻相册")
                     .font(.system(size: 34, weight: .semibold))
                     .tracking(1.2)
                     .foregroundColor(.white.opacity(0.45))

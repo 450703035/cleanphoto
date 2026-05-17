@@ -411,8 +411,8 @@ enum L10n {
     static var privacyPolicy: String { isEn ? "Privacy Policy" : "隐私政策" }
     static var privacyPolicyDesc: String { isEn ? "How we handle your data" : "我们如何处理你的数据" }
     static var privacyPolicyBody: String {
-        isEn ? "PhotoCleaner runs entirely on your device. All photo analysis, scoring and grouping happen locally — no photos, thumbnails, scores or metadata are uploaded to any server.\n\nThe app reads your Photos library only with your permission, and only writes to it when you explicitly delete or convert files. It does not collect personal information, location, or contact data.\n\nWhen you tap “Feedback”, your email client opens with our address pre-filled; the email is sent through your own account on your terms." :
-        "PhotoCleaner 完全在你的设备上运行。所有照片分析、评分与分组都在本地完成，照片、缩略图、评分和元数据都不会上传到任何服务器。\n\n应用仅在你授权后访问相册，仅在你显式删除或转换文件时才会写入。我们不收集个人信息、位置或通讯录。\n\n点击「意见反馈」时，系统邮件会预填我们的地址，邮件通过你自己的账号发送，完全在你的掌控中。"
+        isEn ? "Lighten runs entirely on your device. All photo analysis, scoring and grouping happen locally — no photos, thumbnails, scores or metadata are uploaded to any server.\n\nThe app reads your Photos library only with your permission, and only writes to it when you explicitly delete or convert files. It does not collect personal information, location, or contact data.\n\nWhen you tap “Feedback”, your email client opens with our address pre-filled; the email is sent through your own account on your terms." :
+        "轻相册完全在你的设备上运行。所有照片分析、评分与分组都在本地完成，照片、缩略图、评分和元数据都不会上传到任何服务器。\n\n应用仅在你授权后访问相册，仅在你显式删除或转换文件时才会写入。我们不收集个人信息、位置或通讯录。\n\n点击「意见反馈」时，系统邮件会预填我们的地址，邮件通过你自己的账号发送，完全在你的掌控中。"
     }
 
     // MARK: Tools
@@ -461,7 +461,7 @@ enum L10n {
     static var markedKeep: String { isEn ? "Marked keep · Tap ↩ to undo" : "已标记保留 · 点击 ↩ 可撤销" }
     static var allowDeleteTitle: String { isEn ? "Allow Photo Deletion" : "允许删除照片" }
     static var allowDelete: String { isEn ? "Allow Delete" : "允许删除" }
-    static var deleteAlertMessage: String { isEn ? "PhotoCleaner will move selected photos to Recently Deleted. You can recover them anytime." : "相册管家将把选中的照片移入废纸篓，您随时可以在「最近删除」相册中恢复。" }
+    static var deleteAlertMessage: String { isEn ? "Lighten will move selected photos to Recently Deleted. You can recover them anytime." : "轻相册将把选中的照片移入废纸篓，您随时可以在「最近删除」相册中恢复。" }
     static var deleteStamp: String { isEn ? "DELETE" : "删除" }
     static var keepStamp: String { isEn ? "KEEP" : "保留" }
 
@@ -697,13 +697,13 @@ enum L10n {
 
     static var onboardingPhotoTitle: String { isEn ? "Access Your Photos" : "访问您的相册" }
     static var onboardingPhotoDesc: String {
-        isEn ? "PhotoCleaner needs access to your photo library to analyze and clean up. All processing is done on-device — nothing is uploaded."
-             : "PhotoCleaner 需要访问您的相册进行分析清理。所有处理均在本地完成，不会上传任何数据。"
+        isEn ? "Lighten needs access to your photo library to analyze and clean up. All processing is done on-device — nothing is uploaded."
+             : "轻相册需要访问您的相册进行分析清理。所有处理均在本地完成，不会上传任何数据。"
     }
     static var onboardingPhotoAction: String { isEn ? "Allow Photo Access" : "允许访问相册" }
     static var onboardingPhotoDone: String { isEn ? "Access Granted" : "已获得授权" }
     static var onboardingPhotoDeniedHint: String {
-        isEn ? "Please go to Settings → PhotoCleaner to grant photo access."
-             : "请前往 系统设置 → PhotoCleaner 开启相册访问权限。"
+        isEn ? "Please go to Settings → Lighten to grant photo access."
+             : "请前往 系统设置 → 轻相册 开启相册访问权限。"
     }
 }
