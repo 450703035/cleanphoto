@@ -39,6 +39,7 @@
 		'A026' = {isa = PBXBuildFile; fileRef = F026; };
 		'A027' = {isa = PBXBuildFile; fileRef = F027; };
 		'A028' = {isa = PBXBuildFile; fileRef = F028; };
+		'AXCA' = {isa = PBXBuildFile; fileRef = FXCA; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -74,6 +75,7 @@
 		'F026' = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnnualReportView.swift; sourceTree = "<group>"; };
 		'F027' = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenshotSourceModelRunner.swift; sourceTree = "<group>"; };
 		'F028' = {isa = PBXFileReference; lastKnownFileType = file.mlmodel; path = ScreenshotSourceClassifier.mlmodel; sourceTree = "<group>"; };
+		'FXCA' = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		'FAPP' = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PhotoCleaner.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -149,6 +151,7 @@
 			isa = PBXGroup;
 			children = (
 				F028,
+				FXCA,
 			);
 			path = Resources;
 			sourceTree = "<group>";
@@ -300,6 +303,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				A028,
+				AXCA,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
