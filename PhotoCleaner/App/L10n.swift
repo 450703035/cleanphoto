@@ -411,8 +411,8 @@ enum L10n {
     static var privacyPolicy: String { isEn ? "Privacy Policy" : "隐私政策" }
     static var privacyPolicyDesc: String { isEn ? "How we handle your data" : "我们如何处理你的数据" }
     static var privacyPolicyBody: String {
-        isEn ? "Lighten runs entirely on your device. All photo analysis, scoring and grouping happen locally — no photos, thumbnails, scores or metadata are uploaded to any server.\n\nThe app reads your Photos library only with your permission, and only writes to it when you explicitly delete or convert files. It does not collect personal information, location, or contact data.\n\nWhen you tap “Feedback”, your email client opens with our address pre-filled; the email is sent through your own account on your terms." :
-        "轻相册完全在你的设备上运行。所有照片分析、评分与分组都在本地完成，照片、缩略图、评分和元数据都不会上传到任何服务器。\n\n应用仅在你授权后访问相册，仅在你显式删除或转换文件时才会写入。我们不收集个人信息、位置或通讯录。\n\n点击「意见反馈」时，系统邮件会预填我们的地址，邮件通过你自己的账号发送，完全在你的掌控中。"
+        isEn ? "Lighten runs entirely on your device. All photo analysis, scoring and grouping happen locally — no photos, thumbnails, scores or metadata are uploaded to any server.\n\nThe app reads your Photos library only with your permission, and only writes to it when you explicitly delete or convert files. It does not collect personal information, location, or contact data.\n\nThe app does not collect, use, store, or share any face data or biometric information.\n\nThe app does not integrate any third-party AI services, and does not transmit or share user data with external platforms.\n\nWhen you tap “Feedback”, your email client opens with our address pre-filled; the email is sent through your own account on your terms." :
+        "轻相册完全在你的设备上运行。所有照片分析、评分与分组都在本地完成，照片、缩略图、评分和元数据都不会上传到任何服务器。\n\n应用仅在你授权后访问相册，仅在你显式删除或转换文件时才会写入。我们不收集个人信息、位置或通讯录。\n\n本 App 不收集、不使用、不存储、不共享任何面部数据或生物特征信息。\n\n本 App 未集成任何第三方 AI 服务，不会向外部平台传输或分享用户数据。\n\n点击「意见反馈」时，系统邮件会预填我们的地址，邮件通过你自己的账号发送，完全在你的掌控中。"
     }
 
     // MARK: Tools
@@ -675,7 +675,6 @@ enum L10n {
 
     // MARK: Onboarding
     static var onboardingNext: String { isEn ? "Next" : "下一步" }
-    static var onboardingSkip: String { isEn ? "Skip" : "跳过" }
     static var onboardingStart: String { isEn ? "Get Started" : "开始使用" }
 
     static var onboardingFeature1Title: String { isEn ? "Free Up\nStorage Space" : "释放\n存储空间" }
@@ -700,10 +699,11 @@ enum L10n {
         isEn ? "Lighten needs access to your photo library to analyze and clean up. All processing is done on-device — nothing is uploaded."
              : "轻相册需要访问您的相册进行分析清理。所有处理均在本地完成，不会上传任何数据。"
     }
-    static var onboardingPhotoAction: String { isEn ? "Allow Photo Access" : "允许访问相册" }
+    static var onboardingPhotoAction: String { isEn ? "Next" : "下一步" }
     static var onboardingPhotoDone: String { isEn ? "Access Granted" : "已获得授权" }
+    static var onboardingOpenSettings: String { isEn ? "Open Settings" : "打开系统设置" }
     static var onboardingPhotoDeniedHint: String {
-        isEn ? "Please go to Settings → Lighten to grant photo access."
-             : "请前往 系统设置 → 轻相册 开启相册访问权限。"
+        isEn ? "Photo access is off, so album analysis is unavailable. You can change this in Settings."
+             : "相册访问权限未开启，相册分析功能暂不可用。你可以前往系统设置修改。"
     }
 }

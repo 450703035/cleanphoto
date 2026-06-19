@@ -149,19 +149,14 @@ class ScanViewModel: ObservableObject {
 
     // MARK: - Authorization
 
-    /// Request photo-library permission as early as app launch (Home tab),
-    /// so users won't see the system prompt when entering Timeline later.
+    /// Refresh photo-library permission on app launch without prompting.
+    /// The system authorization prompt is only shown after an explicit user action.
     func requestAuthorizationOnAppLaunchIfNeeded() async {
         let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
         switch status {
         case .authorized, .limited:
             authorized = true
             if phase == .idle, !isBackgroundAnalyzing {
-                startMetadataWarmupIfNeeded()
-            }
-        case .notDetermined:
-            authorized = await service.requestAuthorization()
-            if authorized, phase == .idle, !isBackgroundAnalyzing {
                 startMetadataWarmupIfNeeded()
             }
         default:

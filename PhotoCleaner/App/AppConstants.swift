@@ -210,8 +210,8 @@ enum AppConfig {
         set { UserDefaults.standard.set(newValue, forKey: "autoSelect") }
     }
     static var protectFaces: Bool {
-        get { UserDefaults.standard.object(forKey: "protectFaces") as? Bool ?? true }
-        set { UserDefaults.standard.set(newValue, forKey: "protectFaces") }
+        get { true }
+        set { UserDefaults.standard.set(true, forKey: "protectFaces") }
     }
     static var screenshotGridColumns: Int {
         get {

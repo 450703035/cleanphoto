@@ -17,15 +17,19 @@
 	<key>CFBundlePackageType</key>
 	<string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.0</string>
+	<string>1.1</string>
 	<key>CFBundleVersion</key>
-	<string>1</string>
+	<string>5</string>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
+	<key>LSApplicationCategoryType</key>
+	<string></string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
-	<key>NSPhotoLibraryUsageDescription</key>
-	<string>需要访问您的相册，以便 AI 分析照片质量并帮助您清理无用照片，释放存储空间。所有分析均在本地完成，不会上传任何数据。</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>需要保存转换后的照片到相册。</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>需要访问您的相册，以便 AI 分析照片质量并帮助您清理无用照片，释放存储空间。所有分析均在本地完成，不会上传任何数据。</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
@@ -43,7 +47,5 @@
 	</array>
 	<key>UIUserInterfaceStyle</key>
 	<string>Dark</string>
-	<key>ITSAppUsesNonExemptEncryption</key>
-	<false/>
 </dict>
 </plist>

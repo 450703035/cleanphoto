@@ -7,7 +7,6 @@ struct SettingsView: View {
     @AppStorage("themeMode") private var themeModeRaw = AppThemeMode.system.rawValue
     @AppStorage("appLanguage") private var appLanguageRaw = AppLanguage.zh.rawValue
     @AppStorage("autoSelect")   private var autoSelect   = true
-    @AppStorage("protectFaces") private var protectFaces = true
     @AppStorage("deleteThreshold") private var threshold = 40
     @State private var showThresholdPicker = false
     @State private var stats: DatabaseService.CleaningStats = .zero
@@ -68,11 +67,6 @@ struct SettingsView: View {
                             SettingsToggleRow(icon: "arrow.triangle.2.circlepath", iconBg: AppColors.green,
                                               title: L10n.autoSelect, subtitle: L10n.autoSelectDesc,
                                               isOn: $autoSelect)
-                            Divider().background(AppColors.separator).padding(.leading, 52)
-
-                            SettingsToggleRow(icon: "shield.fill", iconBg: AppColors.red,
-                                              title: L10n.protectFace, subtitle: L10n.protectFaceDesc,
-                                              isOn: $protectFaces)
                         }
 
                         if showThresholdPicker {

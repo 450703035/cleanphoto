@@ -1,5 +1,6 @@
 import SwiftUI
 import Photos
+import UIKit
 
 // MARK: - Page 1: Free up space
 struct FreeSpacePage: View {
@@ -108,39 +109,84 @@ struct PhotoAccessPage: View {
             OnboardingBottomBar(
                 currentPage: currentPage,
                 totalPages: totalPages,
-                primaryTitle: authorized ? L10n.onboardingPhotoDone : L10n.onboardingPhotoAction,
-                primaryIcon: authorized ? "checkmark.circle.fill" : "photo.fill",
+                primaryTitle: primaryTitle,
+                primaryIcon: primaryIcon,
                 primaryWide: true,
                 primaryDisabled: authorized,
-                onPrimary: { requestPhotoAccess() },
-                secondaryTitle: authorized ? L10n.onboardingNext : L10n.onboardingSkip,
-                onSecondary: onAdvance
+                onPrimary: handlePrimaryAction,
+                secondaryTitle: secondaryTitle,
+                onSecondary: secondaryTitle == nil ? nil : onAdvance
             )
         }
         .onAppear { checkExistingStatus() }
     }
 
+    private var primaryTitle: String {
+        if authorized { return L10n.onboardingPhotoDone }
+        if denied { return L10n.onboardingOpenSettings }
+        return L10n.onboardingPhotoAction
+    }
+
+    private var primaryIcon: String {
+        if authorized { return "checkmark.circle.fill" }
+        if denied { return "gearshape.fill" }
+        return "arrow.right"
+    }
+
+    private var secondaryTitle: String? {
+        (authorized || denied) ? L10n.onboardingNext : nil
+    }
+
     private func checkExistingStatus() {
         let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
-        if status == .authorized || status == .limited {
+        switch status {
+        case .authorized, .limited:
             authorized = true
+            denied = false
+        case .denied, .restricted:
+            authorized = false
+            denied = true
+        default:
+            authorized = false
+            denied = false
+        }
+    }
+
+    private func handlePrimaryAction() {
+        if denied {
+            openAppSettings()
+        } else {
+            requestPhotoAccess()
         }
     }
 
     private func requestPhotoAccess() {
         Task { @MainActor in
+            let currentStatus = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+            guard currentStatus == .notDetermined else {
+                checkExistingStatus()
+                return
+            }
+
             let status = await PHPhotoLibrary.requestAuthorization(for: .readWrite)
             switch status {
             case .authorized, .limited:
                 authorized = true
+                denied = false
                 try? await Task.sleep(nanoseconds: 600_000_000)
                 onAdvance()
             case .denied, .restricted:
+                authorized = false
                 denied = true
             default:
                 break
             }
         }
+    }
+
+    private func openAppSettings() {
+        guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+        UIApplication.shared.open(url)
     }
 }
 
