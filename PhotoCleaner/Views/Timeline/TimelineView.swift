@@ -2782,7 +2782,11 @@ struct FullScreenPhotoViewer: View {
     @Binding var assets: [PhotoAsset]
     let startIndex: Int
     @State private var currentIndex: Int
-    @State private var selectionMode = false
+    @State private var shareItems: [Any] = []
+    @State private var showShareSheet = false
+    @State private var isPreparingShare = false
+    @State private var showShareErrorAlert = false
+    @State private var isDeleting = false
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.dismiss) var dismiss
 
@@ -2825,15 +2829,21 @@ struct FullScreenPhotoViewer: View {
 
                 Spacer()
 
-                Button(selectionMode ? L10n.done : L10n.select) {
-                    selectionMode.toggle()
+                Button { shareCurrent() } label: {
+                    Group {
+                        if isPreparingShare {
+                            ProgressView()
+                                .tint(isLightMode ? .black : .white)
+                        } else {
+                            Image(systemName: "square.and.arrow.up")
+                                .font(.system(size: 18, weight: .semibold))
+                                .foregroundColor(isLightMode ? .black : .white)
+                        }
+                    }
+                    .frame(width: 34, height: 34)
                 }
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundColor(selectionMode ? AppColors.green : AppColors.purple)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
-                .background(Color.clear)
-                .cornerRadius(8)
+                .disabled(isPreparingShare || assets.isEmpty)
+                .accessibilityLabel(L10n.share)
             }
             .padding(.horizontal, 16)
             .padding(.top, 6)
@@ -2842,42 +2852,169 @@ struct FullScreenPhotoViewer: View {
         }
         // Bottom panel is also inset so 16:9 photos/videos won't overlap with info/actions.
         .safeAreaInset(edge: .bottom) {
-            VStack(spacing: 8) {
+            VStack(spacing: 10) {
                 if currentIndex < assets.count {
                     FullScreenAssetInfoBar(asset: assets[currentIndex].asset, onMask: isLightMode)
                 }
-                if selectionMode {
-                    let isSelected = currentIndex < assets.count && assets[currentIndex].isSelected
-                    Button {
-                        toggleSelection(at: currentIndex)
-                    } label: {
-                        HStack(spacing: 8) {
-                            SelectionStatusBadge(isSelected: isSelected, size: 22)
-                            Text(isSelected ? L10n.markedDeleteToggle : L10n.markDelete)
+                Button { deleteCurrent() } label: {
+                    HStack(spacing: 8) {
+                        if isDeleting {
+                            ProgressView().tint(.white)
+                        } else {
+                            Image(systemName: "trash")
                                 .font(.system(size: 14, weight: .semibold))
                         }
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 20)
-                        .padding(.vertical, 12)
-                        .background(Color.black.opacity(0.7))
-                        .cornerRadius(24)
+                        Text(L10n.delete)
+                            .font(.system(size: 14, weight: .semibold))
                     }
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 24)
+                    .padding(.vertical, 12)
+                    .background(Color.red.opacity(0.85))
+                    .cornerRadius(24)
                 }
+                .disabled(isDeleting || assets.isEmpty)
             }
             .padding(.horizontal, 12)
             .padding(.top, 6)
             .padding(.bottom, 8)
             .background(isLightMode ? Color.black.opacity(0.14) : Color.black.opacity(0.2))
         }
+        .sheet(isPresented: $showShareSheet, onDismiss: { shareItems = [] }) {
+            FullScreenShareSheet(activityItems: shareItems)
+        }
+        .alert(L10n.shareUnavailable, isPresented: $showShareErrorAlert) {
+            Button(L10n.done, role: .cancel) {}
+        }
     }
 
     private var isLightMode: Bool { colorScheme == .light }
 
-    private func toggleSelection(at index: Int) {
-        guard index < assets.count else { return }
-        var tmp = assets
-        tmp[index].isSelected.toggle()
-        assets = tmp
+    private func shareCurrent() {
+        guard currentIndex < assets.count else { return }
+        let asset = assets[currentIndex].asset
+        isPreparingShare = true
+        Task {
+            let items = await FullScreenShareLoader.loadShareItems(for: asset)
+            await MainActor.run {
+                isPreparingShare = false
+                if items.isEmpty {
+                    showShareErrorAlert = true
+                } else {
+                    shareItems = items
+                    showShareSheet = true
+                }
+            }
+        }
+    }
+
+    private func deleteCurrent() {
+        guard currentIndex < assets.count else { return }
+        let target = assets[currentIndex]
+        isDeleting = true
+        Task {
+            do {
+                try await PhotoLibraryService.shared.deleteAssets([target])
+                await MainActor.run {
+                    isDeleting = false
+                    var tmp = assets
+                    let removeIndex = currentIndex
+                    if removeIndex < tmp.count {
+                        tmp.remove(at: removeIndex)
+                        assets = tmp
+                    }
+                    dismiss()
+                }
+            } catch {
+                await MainActor.run { isDeleting = false }
+            }
+        }
+    }
+}
+
+// MARK: - Share sheet & loader
+
+private struct FullScreenShareSheet: UIViewControllerRepresentable {
+    let activityItems: [Any]
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: activityItems, applicationActivities: nil)
+    }
+
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
+}
+
+private enum FullScreenShareLoader {
+    static func loadShareItems(for asset: PHAsset) async -> [Any] {
+        switch asset.mediaType {
+        case .video:
+            if let url = await exportVideoFile(for: asset) { return [url] }
+            return []
+        case .image:
+            if let url = await exportImageFile(for: asset) { return [url] }
+            if let image = await loadImage(for: asset) { return [image] }
+            return []
+        default:
+            return []
+        }
+    }
+
+    private static func loadImage(for asset: PHAsset) async -> UIImage? {
+        await withCheckedContinuation { (cont: CheckedContinuation<UIImage?, Never>) in
+            let opts = PHImageRequestOptions()
+            opts.deliveryMode = .highQualityFormat
+            opts.isNetworkAccessAllowed = true
+            opts.isSynchronous = false
+            PHImageManager.default().requestImage(
+                for: asset,
+                targetSize: PHImageManagerMaximumSize,
+                contentMode: .default,
+                options: opts
+            ) { img, info in
+                if let isDegraded = info?[PHImageResultIsDegradedKey] as? Bool, isDegraded { return }
+                cont.resume(returning: img)
+            }
+        }
+    }
+
+    private static func exportImageFile(for asset: PHAsset) async -> URL? {
+        await withCheckedContinuation { (cont: CheckedContinuation<URL?, Never>) in
+            let resources = PHAssetResource.assetResources(for: asset)
+            guard let primary = resources.first(where: { $0.type == .photo })
+                ?? resources.first(where: { $0.type == .fullSizePhoto })
+                ?? resources.first else {
+                cont.resume(returning: nil); return
+            }
+            let ext = (primary.originalFilename as NSString).pathExtension
+            let filename = "share-\(UUID().uuidString)" + (ext.isEmpty ? "" : ".\(ext)")
+            let tmpURL = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent(filename)
+            try? FileManager.default.removeItem(at: tmpURL)
+            let opts = PHAssetResourceRequestOptions()
+            opts.isNetworkAccessAllowed = true
+            PHAssetResourceManager.default().writeData(for: primary, toFile: tmpURL, options: opts) { error in
+                cont.resume(returning: error == nil ? tmpURL : nil)
+            }
+        }
+    }
+
+    private static func exportVideoFile(for asset: PHAsset) async -> URL? {
+        await withCheckedContinuation { (cont: CheckedContinuation<URL?, Never>) in
+            let resources = PHAssetResource.assetResources(for: asset)
+            guard let primary = resources.first(where: { $0.type == .video })
+                ?? resources.first(where: { $0.type == .fullSizeVideo })
+                ?? resources.first else {
+                cont.resume(returning: nil); return
+            }
+            let ext = (primary.originalFilename as NSString).pathExtension
+            let filename = "share-\(UUID().uuidString)" + (ext.isEmpty ? ".mov" : ".\(ext)")
+            let tmpURL = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent(filename)
+            try? FileManager.default.removeItem(at: tmpURL)
+            let opts = PHAssetResourceRequestOptions()
+            opts.isNetworkAccessAllowed = true
+            PHAssetResourceManager.default().writeData(for: primary, toFile: tmpURL, options: opts) { error in
+                cont.resume(returning: error == nil ? tmpURL : nil)
+            }
+        }
     }
 }
 

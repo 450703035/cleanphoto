@@ -240,6 +240,9 @@ enum L10n {
     static var select: String { isEn ? "Select" : "选择" }
     static var clearAll: String { isEn ? "Clear" : "清空" }
     static var deleteSelected: String { isEn ? "Delete Selected" : "删除所选" }
+    static var share: String { isEn ? "Share" : "分享" }
+    static var delete: String { isEn ? "Delete" : "删除" }
+    static var shareUnavailable: String { isEn ? "Unable to share this item" : "无法分享此项" }
     static var photosUnit: String { isEn ? "photos" : "张照片" }
     static var processing: String { isEn ? "Processing…" : "处理中…" }
     static var loading: String { isEn ? "Loading…" : "加载中…" }
